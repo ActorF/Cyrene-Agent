@@ -67,6 +67,7 @@ export async function prepareToolRuntime(input: {
       risk,
       runId,
       signal,
+      allowPrompt: options.allowPermissionPrompt,
     })).allowed;
   };
 

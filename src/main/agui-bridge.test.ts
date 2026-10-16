@@ -1614,6 +1614,7 @@ describe("agui-bridge background shell smoke (mock sessions, isolated SQLite)", 
     expect(resumed.conversationId).toBe("original");
     expect(resumed.transcriptSink).toBeDefined();
     expect(resumed.harnessInteractiveTools).toBe(false);
+    expect(resumed.allowPermissionPrompt).toBe(false);
     expect(resumed.permissionMode).not.toBe("allow_all");
     expect(resumed.messages).toEqual(expect.arrayContaining([expect.objectContaining({ visibility: "internal", content: expect.stringContaining('"exitCode":7') })]));
     expect(await resumed.pollShellCompletions!()).toEqual([]);
@@ -1622,6 +1623,23 @@ describe("agui-bridge background shell smoke (mock sessions, isolated SQLite)", 
     expect(entries.filter(entry => entry.kind === "background_event")).toHaveLength(1);
     expect(entries.filter(entry => entry.kind === "user")).toHaveLength(0);
     await expect.poll(() => bridge.__getSessionActiveRunForTest("original")).toBeUndefined();
+  });
+
+  it.each(["code", "work", "learn"])("retires a persisted completion when the %s workspace is cleared", async mode => {
+    const original = await start();
+    await expect.poll(() => bridge.__getSessionActiveRunForTest("original")).toBeUndefined();
+    mocks.getSession.mockImplementation((id: string) => ({ id, mode, messages: [] }));
+    original.onShellJobComplete!(snapshot());
+    const { getConversationTranscriptStore } = await import("./orchestrator/conversation-transcript-store");
+    await expect.poll(async () => (await getConversationTranscriptStore(mocks.userDataRoot).read("original")).entries.length).toBe(1);
+    // 等待超过重试间隔，确保没有继续读取会话或遗留待投递事件。
+    await new Promise(resolve => setTimeout(resolve, 100));
+    const reads = mocks.getSession.mock.calls.length;
+    await new Promise(resolve => setTimeout(resolve, 1200));
+    expect(mocks.getSession.mock.calls.length).toBe(reads);
+    expect(mocks.runCyreneAgent).toHaveBeenCalledTimes(1);
+    expect(await original.pollShellCompletions!()).toEqual([]);
+    expect((await getConversationTranscriptStore(mocks.userDataRoot).read("original")).entries[0].kind).toBe("background_event");
   });
 
   it("busy completion is injected once and never starts a concurrent run", async () => {

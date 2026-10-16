@@ -139,6 +139,8 @@ export interface CyreneRunOptions {
   harnessInteractiveTools?: boolean;
   /** 工具权限结算方式；手机端全部开启使用 allow_all 跳过逐项审批。 */
   permissionMode?: "normal" | "allow_all";
+  /** 无前端运行控制器的续轮不能创建人工审批卡片。 */
+  allowPermissionPrompt?: boolean;
   /** 直发图片被主模型接口拒绝时，懒加载 caption fallback 消息并重试。 */
   imageCaptionFallback?: () => Promise<ChatMessage[]>;
   /** 工具规则与目录 system prompt（进入 harness stablePrefix）。 */

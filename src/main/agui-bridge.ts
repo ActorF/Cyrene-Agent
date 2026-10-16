@@ -419,11 +419,14 @@ export function registerAgUiIpc(
     const session = await loadComposedSession(sessionId);
     if (!session) {
       endConversation();
+      if (background) { inbox.discard(sessionId); return { success: false, runId }; }
       throw new Error(`AGUI_RUN 会话不存在: ${sessionId}`);
     }
     const mode = session.mode ?? (session.purpose === "proactive-chat" ? "chat" : "work");
     if ((mode === "work" || mode === "code" || mode === "learn") && !session.workspaceBinding?.workspaceRoot) {
       endConversation();
+      // 结束事实已落盘；工作区解绑后等用户显式继续，不能每秒重试唤醒。
+      if (background) { inbox.discard(sessionId); return { success: false, runId }; }
       throw new Error(`${mode} 模式需要先绑定项目工作区`);
     }
 
@@ -661,7 +664,10 @@ export function registerAgUiIpc(
     if (background && runAbortController.signal.aborted) throw new Error("SHELL_COMPLETION_CANCELLED");
     options.executionMode = agentExecutionMode;
     // 空闲续跑没有渲染端 Ask 会话，工具权限仍沿用正常检查。
-    if (background) options.harnessInteractiveTools = false;
+    if (background) {
+      options.harnessInteractiveTools = false;
+      options.allowPermissionPrompt = false;
+    }
     // 轨迹侧崩溃孤儿提示与派发侧（渠道）恢复上下文合并，互不覆盖
     const mergedRecoveryContext = [options.recoveryContext, input.recoveryContext]
       .filter((value): value is string => Boolean(value?.trim()))

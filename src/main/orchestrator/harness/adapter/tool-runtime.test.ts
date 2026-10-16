@@ -28,7 +28,7 @@ vi.mock("electron", () => ({ app: { getPath: vi.fn(() => "C:\\cyrene-runtime") }
 import { prepareToolRuntime } from "./tool-runtime";
 
 /** 构造一次 code 模式 run 的 tool runtime（Plan Guard 生效条件：code/chat + isPlanReadOnly）。 */
-async function makeRuntime(permissionMode: "prompt" | "allow_all") {
+async function makeRuntime(permissionMode: "prompt" | "allow_all", allowPermissionPrompt?: boolean) {
   return prepareToolRuntime({
     options: {
       conversationId: "thread-1",
@@ -37,6 +37,7 @@ async function makeRuntime(permissionMode: "prompt" | "allow_all") {
       messages: [{ role: "user", content: "做个计划" }],
       requestUserClarification: vi.fn(async () => ({ answers: [] })),
       permissionMode,
+      allowPermissionPrompt,
     } as never,
     signal: new AbortController().signal,
     prepared: {
@@ -104,6 +105,15 @@ describe("harness tool runtime", () => {
     expect(createTaskExecutor).toHaveBeenCalledWith(expect.objectContaining({
       parent: expect.objectContaining({ signal: controller.signal }),
     }));
+  });
+
+  it("background permission checks forbid approval cards, including delegated tasks", async () => {
+    checkPermission.mockResolvedValue({ allowed: false });
+    const runtime = await makeRuntime("prompt", false);
+    expect(await runtime.checkPermission("read_file", {})).toBe(false);
+    expect(checkPermission).toHaveBeenCalledWith(expect.objectContaining({ allowPrompt: false, runId: "run-1" }));
+    const parent = createTaskExecutor.mock.calls[0][0] as { parent: { checkPermission: typeof runtime.checkPermission } };
+    expect(parent.parent.checkPermission).toBe(runtime.checkPermission);
   });
 
   describe("Plan 只读不变量（先于 allow_all，按 effectKind 判断）", () => {
