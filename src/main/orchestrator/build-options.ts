@@ -619,7 +619,7 @@ export async function buildAgentRunOptions(
       : undefined);
   // 预算检查对传入与自建上下文一视同仁：长会话无论从桌面还是渠道入口进入，
   // 都必须先提交自动压缩检查点，再重读 journal 作为最终上下文。
-  if (input.currentUser && input.sessionId && transcriptContext) {
+  if (input.sessionId && transcriptContext) {
     const compactionTriggerTokens = resolveCompactionTriggerTokens(contextWindowTokens);
     const estimatedMessages = estimateMessageTokens(transcriptContext.messages);
     if (estimatedMessages >= compactionTriggerTokens) {
@@ -658,7 +658,7 @@ export async function buildAgentRunOptions(
   // slim view for downstream helpers that only need { role, content }
   const slimMessages = messages as unknown as Array<{ role: string; content?: string }>;
   const latestUserText = stripTurnModelContextForSideEffects(
-    contentToText(messages.filter((m) => m.role === "user").at(-1)?.content) ?? "",
+    contentToText(messages.filter((m) => m.role === "user" && m.visibility !== "internal").at(-1)?.content) ?? "",
   );
   const executionMode = resolveExecutionMode(
     input.executionMode ?? ((input.style || "").startsWith("talk") ? "chat" : "work"),

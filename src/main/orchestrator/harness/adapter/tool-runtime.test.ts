@@ -70,6 +70,7 @@ describe("harness tool runtime", () => {
   it("uses one signal for context, permission, and task execution", async () => {
     const controller = new AbortController();
     const clarify = vi.fn(async () => ({ answers: [] }));
+    const onShellJobComplete = vi.fn();
     const runtime = await prepareToolRuntime({
       options: {
         conversationId: "thread-1",
@@ -77,6 +78,7 @@ describe("harness tool runtime", () => {
         settings: { provider: "test", baseUrl: "", model: "model", apiKey: "" },
         messages: [{ role: "user", content: "读文件" }],
         requestUserClarification: clarify,
+        onShellJobComplete,
         permissionMode: "prompt",
       } as never,
       signal: controller.signal,
@@ -92,6 +94,7 @@ describe("harness tool runtime", () => {
     });
 
     expect(runtime.toolContext.signal).toBe(controller.signal);
+    expect(runtime.toolContext.onShellJobComplete).toBe(onShellJobComplete);
     await runtime.checkPermission("read_file", { path: "x" });
     expect(checkPermission).toHaveBeenCalledWith(expect.objectContaining({
       runId: "run-1",

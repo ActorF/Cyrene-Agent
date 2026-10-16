@@ -9,7 +9,7 @@ export function validateLoadedTranscriptEntry(entry: unknown): asserts entry is 
     "user", "assistant", "tool_result", "interruption", "turn_rewind",
     "tool_started", "task_state", "effect_resolution",
     "backfill_boundary", "compaction_checkpoint", "presentation_patch",
-    "turn_tombstone", "delivery_receipt",
+    "turn_tombstone", "delivery_receipt", "background_event",
   ]);
   if (typeof candidate.id !== "string" ||
     candidate.id.length === 0 ||
@@ -40,6 +40,9 @@ function isValidTranscriptPayload(entry: Partial<TranscriptEntry>): boolean {
   if (!isRecord(entry.payload))
     return false;
   switch (entry.kind) {
+    case "background_event":
+      return typeof entry.payload.jobId === "string" && entry.payload.jobId.length > 0 &&
+        isValidCanonicalChatMessage(entry.payload.message) && entry.payload.message.visibility === "internal";
     case "user":
       return typeof entry.turnId === "string" && entry.turnId.length > 0 &&
         Number.isInteger(entry.revision) && (entry.revision ?? 0) >= 1 &&

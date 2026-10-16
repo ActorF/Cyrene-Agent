@@ -80,6 +80,22 @@ function compactedFixture(): TranscriptEntry[] {
 }
 
 describe("conversation transcript projection", () => {
+  it("materializes background events for the model without inventing user UI messages, including incremental projection and rewind", () => {
+    const first = user("background-user", "run a command");
+    const seq = ++nextSeq;
+    const event: TranscriptEntry = { seq, id: "shell-completed:job-1", at: seq, kind: "background_event",
+      payload: { jobId: "job-1", message: { role: "user", visibility: "internal", content: "shell exited 0" } } };
+    const reply = assistant("background-answer", "command completed");
+    const entries = [first, event, reply];
+    expect(buildFullModelContext(entries, noRuns).messages).toEqual(expect.arrayContaining([event.payload.message]));
+    const full = reduceTranscriptProjection(entries);
+    expect(full.messages.map(message => message.content)).toEqual(["run a command", "command completed"]);
+    const seed = reduceTranscriptProjection([first]);
+    expect(reduceTranscriptProjection(entries, seed).messages).toEqual(full.messages);
+    const rewind: TranscriptEntry = { seq: ++nextSeq, id: "rewind-background", at: nextSeq, kind: "turn_rewind",
+      payload: { anchorUserTurnId: "background-user", disposition: "keep_user", reason: "regenerate" } };
+    expect(buildFullModelContext([...entries, rewind], noRuns).messages).toEqual([{ role: "user", content: "run a command" }]);
+  });
   it("墓碑移除目标 user 及其尾部但不删除更早 UI 历史", () => {
     nextSeq = 0;
     const result = reduceTranscriptProjection([

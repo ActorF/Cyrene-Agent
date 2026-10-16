@@ -1564,6 +1564,141 @@ describe("agui-bridge pending adjust IPC", () => {
   });
 });
 
+describe("agui-bridge background shell smoke (mock sessions, isolated SQLite)", () => {
+  let bridge: typeof import("./agui-bridge");
+  beforeEach(async () => {
+    vi.resetModules();
+    mocks.handlers.clear();
+    mocks.runCyreneAgent.mockReset();
+    mocks.getSessionRecord.mockReset();
+    mocks.composeSession.mockReset();
+    mocks.agentEvents = [];
+    mocks.runFinishedResult = undefined;
+    mocks.emitDuplicateRunFinished = false;
+    mocks.errorAfterRunFinished = null;
+    mocks.skipDefaultRunFinished = false;
+    mocks.neverComplete = false;
+    mocks.completeOnAbort = false;
+    mocks.resetPendingAdjustByRun.mockResolvedValue({ ok: true, reset: 0 });
+    mocks.getPendingMessages.mockResolvedValue([]);
+    mocks.getSession.mockImplementation((id: string) => ({ id, mode: "code", messages: [],
+      workspaceBinding: { workspaceRoot: mocks.userDataRoot, displayName: "isolated", boundAt: 1 } }));
+    bridge = await import("./agui-bridge");
+    bridge.registerAgUiIpc(async input => ({ options: {
+      settings: { provider: "test", baseUrl: "", model: "fake", apiKey: "", contextWindowTokens: 256000 },
+      messages: input.modelContext?.messages ?? [], conversationId: input.sessionId,
+      timeoutMs: 1000, toolSystemContent: "TOOL", soulSystemBaseContent: "SOUL",
+    }, latestUserText: "fixture" }), async () => {}, () => null);
+  });
+  afterEach(async () => {
+    await bridge.disposeShellCompletionDispatch();
+    mocks.skipDefaultRunFinished = false;
+    mocks.neverComplete = false;
+    mocks.completeOnAbort = false;
+    vi.doUnmock("child_process");
+  });
+  const snapshot = (jobId = "job-smoke") => ({ jobId, pid: null, status: "exited" as const, exitCode: 7,
+    reason: null, totalBytes: 4, logFile: "fixture.log", command: "fixture", shell: "cmd", startedAt: "2026-01-01", durationMs: 10, tail: "done" });
+  async function start() {
+    await mocks.handlers.get(IPC.AGUI_RUN)!({ sender: { isDestroyed: () => false, send: vi.fn() } },
+      { sessionId: "original", assistantTurnId: "initial" });
+    return mocks.runCyreneAgent.mock.calls[0][0] as import("./orchestrator/cyrene-agent").CyreneRunOptions;
+  }
+
+  it("idle completion wakes the original conversation and provides durable result context without a fake user turn", async () => {
+    const original = await start();
+    await expect.poll(() => bridge.__getSessionActiveRunForTest("original")).toBeUndefined();
+    original.onShellJobComplete!(snapshot());
+    await expect.poll(() => mocks.runCyreneAgent.mock.calls.length).toBe(2);
+    const resumed = mocks.runCyreneAgent.mock.calls[1][0] as typeof original;
+    expect(resumed.conversationId).toBe("original");
+    expect(resumed.transcriptSink).toBeDefined();
+    expect(resumed.harnessInteractiveTools).toBe(false);
+    expect(resumed.permissionMode).not.toBe("allow_all");
+    expect(resumed.messages).toEqual(expect.arrayContaining([expect.objectContaining({ visibility: "internal", content: expect.stringContaining('"exitCode":7') })]));
+    expect(await resumed.pollShellCompletions!()).toEqual([]);
+    const { getConversationTranscriptStore } = await import("./orchestrator/conversation-transcript-store");
+    const entries = (await getConversationTranscriptStore(mocks.userDataRoot).read("original")).entries;
+    expect(entries.filter(entry => entry.kind === "background_event")).toHaveLength(1);
+    expect(entries.filter(entry => entry.kind === "user")).toHaveLength(0);
+    await expect.poll(() => bridge.__getSessionActiveRunForTest("original")).toBeUndefined();
+  });
+
+  it("busy completion is injected once and never starts a concurrent run", async () => {
+    mocks.skipDefaultRunFinished = true; mocks.neverComplete = true; mocks.completeOnAbort = true;
+    const original = await start();
+    original.onShellJobComplete!(snapshot());
+    const messages = await original.pollShellCompletions!();
+    expect(messages).toHaveLength(1);
+    expect(await original.pollShellCompletions!()).toEqual([]);
+    expect(mocks.runCyreneAgent).toHaveBeenCalledTimes(1);
+    mocks.handlers.get(IPC.AGUI_CANCEL)!({}, original.runId);
+    await expect.poll(() => bridge.__getSessionActiveRunForTest("original")).toBeUndefined();
+  });
+
+  it("smoke: local process terminal -> log flush -> inbox -> SQLite transcript -> idle agent continuation", async () => {
+    const original = await start();
+    await expect.poll(() => bridge.__getSessionActiveRunForTest("original")).toBeUndefined();
+    const { EventEmitter } = await import("node:events");
+    const { PassThrough } = await import("node:stream");
+    const child = Object.assign(new EventEmitter(), { stdout: new PassThrough(), stderr: new PassThrough() });
+    const spawn = vi.fn(() => child);
+    vi.doMock("child_process", () => ({ spawn }));
+    const manager = await import("./orchestrator/tools/builtin-tools/shell-job-manager");
+    try {
+      const job = await manager.startShellJob({ command: "simulated-command", shell: "cmd", onComplete: original.onShellJobComplete,
+        spec: { command: "never-executed", args: [], env: {}, windowsVerbatimArguments: false, ranViaSandbox: false } });
+      expect(spawn).toHaveBeenCalledTimes(1);
+      child.stdout.emit("data", Buffer.from("smoke-result"));
+      child.emit("close", 0);
+      await expect.poll(() => mocks.runCyreneAgent.mock.calls.length).toBe(2);
+      const resumed = mocks.runCyreneAgent.mock.calls[1][0] as typeof original;
+      expect(JSON.stringify(resumed.messages)).toContain("smoke-result");
+      expect(JSON.stringify(resumed.messages)).toContain(job.jobId);
+      await expect.poll(() => bridge.__getSessionActiveRunForTest("original")).toBeUndefined();
+      const { getConversationDatabase } = await import("./storage/conversation-database-client");
+      expect(await getConversationDatabase(mocks.userDataRoot).call("shellJobs.get", job.jobId)).toMatchObject({ status: "exited", exitCode: 0 });
+    } finally { await manager.disposeAllShellJobs(); }
+  });
+
+  it("cancellation, deleted conversations and shutdown cannot restart the agent", async () => {
+    mocks.skipDefaultRunFinished = true; mocks.neverComplete = true; mocks.completeOnAbort = true;
+    const original = await start();
+    mocks.handlers.get(IPC.AGUI_CANCEL)!({}, original.runId);
+    await expect.poll(() => bridge.__getSessionActiveRunForTest("original")).toBeUndefined();
+    original.onShellJobComplete!(snapshot());
+    const { getConversationTranscriptStore } = await import("./orchestrator/conversation-transcript-store");
+    await expect.poll(async () => (await getConversationTranscriptStore(mocks.userDataRoot).read("original")).entries.length).toBe(1);
+    mocks.getSession.mockReturnValue(null);
+    original.onShellJobComplete!(snapshot("deleted-job"));
+    await bridge.disposeShellCompletionDispatch();
+    original.onShellJobComplete!(snapshot("after-shutdown"));
+    expect(mocks.runCyreneAgent).toHaveBeenCalledTimes(1);
+  });
+
+  it("shutdown while preparing an idle continuation never starts its model run", async () => {
+    let releaseBuild!: () => void;
+    let backgroundBuilding = false;
+    bridge.registerAgUiIpc(async input => {
+      if (input.modelContext) {
+        backgroundBuilding = true;
+        await new Promise<void>(resolve => { releaseBuild = resolve; });
+      }
+      return { options: { settings: { provider: "test", baseUrl: "", model: "fake", apiKey: "" },
+        messages: input.modelContext?.messages ?? [], toolSystemContent: "TOOL", soulSystemBaseContent: "SOUL" }, latestUserText: "fixture" };
+    }, async () => {}, () => null);
+    const original = await start();
+    await expect.poll(() => bridge.__getSessionActiveRunForTest("original")).toBeUndefined();
+    original.onShellJobComplete!(snapshot());
+    await expect.poll(() => backgroundBuilding).toBe(true);
+    const stopping = bridge.disposeShellCompletionDispatch();
+    releaseBuild();
+    await stopping;
+    expect(mocks.runCyreneAgent).toHaveBeenCalledTimes(1);
+    expect(bridge.__getSessionActiveRunForTest("original")).toBeUndefined();
+  });
+});
+
 describe("agui-bridge transcript dispatch", () => {
   const roots: string[] = [];
 

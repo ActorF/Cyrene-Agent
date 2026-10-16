@@ -71,6 +71,7 @@ type RewindEntry = Extract<TranscriptEntry, { kind: "turn_rewind" }>;
 type CompactionEntry = Extract<TranscriptEntry, { kind: "compaction_checkpoint" }>;
 
 type ActiveNode =
+  | { kind: "background_event"; entry: Extract<TranscriptEntry, { kind: "background_event" }> }
   | { kind: "user"; entry: UserEntry | RewindEntry; text: string }
   | {
       kind: "assistant";
@@ -116,6 +117,9 @@ function reduceActiveTranscript(entries: TranscriptEntry[]): ActiveTranscript {
   for (const entry of entries) {
     throughSeq = Math.max(throughSeq, entry.seq);
     switch (entry.kind) {
+      case "background_event":
+        nodes.push({ kind: "background_event", entry });
+        break;
       case "user":
         nodes.push({ kind: "user", entry, text: entry.payload.text });
         break;
@@ -225,6 +229,11 @@ function materializeNodes(
   const uncertainEffects: UncertainEffect[] = [];
   const sourceSeqs: number[] = [];
   for (const node of nodes) {
+    if (node.kind === "background_event") {
+      messages.push(node.entry.payload.message);
+      sourceSeqs.push(node.entry.seq);
+      continue;
+    }
     if (node.kind === "user") {
       messages.push({ role: "user", content: node.text });
       sourceSeqs.push(node.entry.seq);
@@ -575,6 +584,7 @@ function contentToText(content: ChatMessageContent | undefined): string {
 }
 
 function makeUiMessage(node: ActiveNode): CanonicalUiMessage | null {
+  if (node.kind === "background_event") return null;
   if (node.kind === "user") {
     return {
       message: {
@@ -1027,7 +1037,7 @@ function projectionFromActive(
     throughSeq: Math.max(seed?.throughSeq ?? 0, active.throughSeq),
     messages: resultMessages,
     state: {
-      nodes: active.nodes.map(nodeStateFromActive),
+      nodes: active.nodes.filter(node => node.kind !== "background_event").map(nodeStateFromActive),
       patches: [...allPatches.entries()]
         .sort(([left], [right]) => left.localeCompare(right))
         .map(([messageId, record]) => ({

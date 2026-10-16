@@ -76,6 +76,14 @@ async function buildAgentRunOptions(
 }
 
 describe("build-options", () => {
+  it("keeps background facts in model context without treating them as the user's query", async () => {
+    const result = await buildAgentRunOptions({ sessionId: "background", mode: "chat", executionMode: "chat",
+      messages: [{ role: "user", content: "build the project" },
+        { role: "user", visibility: "internal", content: "[后台 Shell 任务结束事件] exitCode=0" }],
+    }, createBuildDeps());
+    expect(result.latestUserText).toBe("build the project");
+    expect(result.options.messages).toEqual(expect.arrayContaining([expect.objectContaining({ visibility: "internal", content: expect.stringContaining("exitCode=0") })]));
+  });
   it.each(["chat", "work", "learn", "code"] as const)("uses the explicit %s mode prompt", async (mode) => {
     const deps = createBuildDeps();
     deps.buildModePrompt = (target) => `[MODE:${target}]`;

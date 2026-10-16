@@ -55,6 +55,17 @@ import {
 import { cancelPendingApprovalsForRun } from "./permission";
 import { cancelPendingQuizzesForRun, takeQuizEvidenceForRun } from "./orchestrator/pop-quiz";
 import type { PluginPromptMode, PluginTurnCompletedEvent } from "../plugins/types";
+import { ShellCompletionDispatcher } from "./orchestrator/shell-completion-dispatcher";
+
+let shellCompletions: ShellCompletionDispatcher | undefined;
+const backgroundRunControllers = new Set<AbortController>();
+export async function disposeShellCompletionDispatch(): Promise<void> {
+  const disposed = shellCompletions?.dispose();
+  shellCompletions = undefined;
+  for (const controller of backgroundRunControllers) controller.abort();
+  backgroundRunControllers.clear();
+  await disposed;
+}
 /**
  * 从 RUN_FINISHED 事件中提取规范的终态结果（terminal）。
  *
@@ -335,11 +346,32 @@ export function registerAgUiIpc(
   }
 
   const onFinished = onRunFinished;
-  ipc.handle(IPC.AGUI_RUN, async (event: IpcMainInvokeEvent, rawInput: unknown) => {
+  void disposeShellCompletionDispatch();
+  const inbox = new ShellCompletionDispatcher({
+    append: async (completion, message) => {
+      if (!await chatsStore.getSession(completion.conversationId)) {
+        inbox.discard(completion.conversationId);
+        return;
+      }
+      await transcriptStore.append(completion.conversationId, {
+        kind: "background_event", id: `shell-completed:${completion.snapshot.jobId}`,
+        at: message.internal!.createdAt, runId: completion.sourceRunId,
+        payload: { jobId: completion.snapshot.jobId, message },
+      });
+    },
+    isBusy: sessionId => sessionActiveRuns.has(sessionId),
+    wake: async (sessionId, eventId) => {
+      if (!await chatsStore.getSession(sessionId)) { inbox.discard(sessionId); return; }
+      await dispatchRun({}, { sessionId, assistantTurnId: `shell-reply:${eventId}` }, true);
+    },
+    onError: error => console.warn("[AgUiBridge] 后台任务通知失败:", error),
+  });
+  shellCompletions = inbox;
+  const dispatchRun = async (event: { sender?: WebContents }, rawInput: unknown, background = false) => {
     if (!buildOptionsFn || !onFinished) {
       throw new Error("AG-UI 桥未初始化");
     }
-    lifecycle?.onUserMessage();
+    if (!background) lifecycle?.onUserMessage();
     lifecycle?.onConversationStarted();
     perf.beginTurn("desktop");
     let conversationEnded = false;
@@ -364,7 +396,7 @@ export function registerAgUiIpc(
         ? { ...(baseEvent as Record<string, unknown>), runId: (baseEvent as { runId?: unknown }).runId ?? runId }
         : baseEvent;
       const targets: WebContents[] = [];
-      if (!sender.isDestroyed()) targets.push(sender);
+      if (sender && !sender.isDestroyed()) targets.push(sender);
       const chatWin = getChatWindowFn();
       if (chatWin && !chatWin.isDestroyed() && chatWin.webContents !== sender) {
         targets.push(chatWin.webContents);
@@ -480,15 +512,28 @@ export function registerAgUiIpc(
 
     let admitted = false;
     try {
+      if (background && !inbox.canWake(sessionId)) {
+        releaseSessionGuard?.();
+        endConversation();
+        return { success: false, runId };
+      }
       const receipt = await database.call<DispatchReceipt>("runs.admit", sessionId, requestId, requestFacts, runId);
       if (receipt.duplicate) { releaseSessionGuard?.(); endConversation(); return duplicateAck(receipt); }
       const guard = sessionActiveRuns.get(sessionId);
       runId = receipt.runId;
       if (guard) guard.runId = runId;
       admitted = true;
+      if (background) {
+        if (!inbox.canWake(sessionId)) throw new Error("SHELL_COMPLETION_CANCELLED");
+        backgroundRunControllers.add(runAbortController);
+      } else inbox.resume(sessionId);
     // ── 轨迹派发：canonical user/rewind → presentation → model context ──
     // renderer 的 messages（即使恶意/旧版载荷仍携带）永远不参与模型上下文。
     let modelContext: MaterializedTranscript | undefined;
+    if (background) {
+      await inbox.take(sessionId);
+      modelContext = await journal.buildModelContext(sessionId);
+    }
     if (currentUser) {
       try {
         const currentMessage: ChatMessage = {
@@ -601,6 +646,7 @@ export function registerAgUiIpc(
       modelProfileId: session.modelProfileId,
       sessionModelSettings,
       executionMode: agentExecutionMode,
+      ...(background ? { modelContext } : {}),
     }));
     } catch (error) {
       perf.dump();
@@ -612,7 +658,10 @@ export function registerAgUiIpc(
       throw error;
     }
     const { options, latestUserText } = built;
+    if (background && runAbortController.signal.aborted) throw new Error("SHELL_COMPLETION_CANCELLED");
     options.executionMode = agentExecutionMode;
+    // 空闲续跑没有渲染端 Ask 会话，工具权限仍沿用正常检查。
+    if (background) options.harnessInteractiveTools = false;
     // 轨迹侧崩溃孤儿提示与派发侧（渠道）恢复上下文合并，互不覆盖
     const mergedRecoveryContext = [options.recoveryContext, input.recoveryContext]
       .filter((value): value is string => Boolean(value?.trim()))
@@ -623,11 +672,8 @@ export function registerAgUiIpc(
     // 一路传到 Agent / Harness adapter / ToolContext / 所有 AG-UI 事件。
     // ack.runId 与 RUN_STARTED.runId 必须一致。
     options.runId = runId;
-    // 轨迹写入总开关（CTA）：桌面 dispatch 带 userTurnId 才写轨迹——
-    // 缺 userTurnId 的兼容调用按渲染端消息走，sink 与插话轨迹端口都不注入，
-    // 否则模型回写没有对应 user 的孤立 assistant 条目。
-    // renderer 回退只切换读取源，不影响这里（带 userTurnId 时双写持续）。
-    const transcriptEnabled = Boolean(currentUser);
+    // 用户派发和已持久化后台事件都写 canonical 回复；旧无锚点调用仍不写轨迹。
+    const transcriptEnabled = Boolean(currentUser) || background;
     // 轨迹提交端（CTA）：每 run 一个 sink，entryId 全程确定性，canonical assistant /
     // tool_result 经它写入权威轨迹。
     // 渲染端 assistantTurnId 存在时透传（ChatLoop 单轮路径的 assistant 条目锚点）。
@@ -641,6 +687,17 @@ export function registerAgUiIpc(
     // 触发 harness 返回 cancelled，CyreneAgent 发出 RUN_FINISHED(result.status="cancelled")，
     // complete 回调自然清理。
     options.signal = runAbortController.signal;
+    options.onShellJobComplete = snapshot => inbox.enqueue({
+      conversationId: sessionId, sourceRunId: runId, snapshot, signal: runAbortController.signal,
+    });
+    const seenShellEvents = new Set((modelContext?.messages ?? options.messages)
+      .flatMap(message => message.internal ? [message.internal.id] : []));
+    options.pollShellCompletions = async () => (await inbox.take(sessionId)).filter(message => {
+      const id = message.internal!.id;
+      if (seenShellEvents.has(id)) return false;
+      seenShellEvents.add(id);
+      return true;
+    });
     // 插话轮询：把"插入当前运行下一步"的待发条目在模型请求边界提交并注入。
     // Chat 无工具链路是单请求运行，没有安全的下一步，不接轮询（IPC 侧同步拒绝）。
     // 数据库事务同时提交插话与队列变更，成功后才注入运行。
@@ -687,7 +744,7 @@ export function registerAgUiIpc(
     // 桌面轮次事件：run 真正开跑时登记协调器（立即发布 turn:started）。
     // turn:finished 由协调器在"终态 + 渲染端落盘确认"双条件满足后发布一次。
     let detachPendingTurnWatchers: (() => void) | null = null;
-    if (pendingTurns) {
+    if (pendingTurns && sender && !background) {
       pendingTurns.beginTurn({
         runId,
         conversationId: sessionId,
@@ -717,6 +774,7 @@ export function registerAgUiIpc(
     // 审批卡不再设超时，任何终态路径（success/cancelled/timeout/error）都必须走到这里，
     // 否则 pending promise 会永久悬挂；取消时会广播 PERMISSION_APPROVAL_SETTLED 让渲染端清卡。
     const cleanupRunState = (): void => {
+      backgroundRunControllers.delete(runAbortController);
       activeRuns.delete(runId);
       cancelPendingChoicesForRun(runId);
       cancelPendingApprovalsForRun(runId);
@@ -745,6 +803,7 @@ export function registerAgUiIpc(
         try { unregisterObsidianTools(); } catch { /* ignore */ }
       }
       endConversation();
+      inbox.kick(sessionId);
     };
 
     // <think> 标签过滤器：按单条 assistant message 隔离（TEXT_MESSAGE_START ~ END）
@@ -982,7 +1041,7 @@ export function registerAgUiIpc(
           // cancelled / timeout / runtime_error 不跑成功收尾副作用
           // （sticker / memory / learn-progress / 历史召回）。
           // 这些副作用假定 run 已经成功产出回复；其他终态不能保证有可用 finalAnswer。
-          if (agent.lastResult && isSuccessfulCompletion) {
+          if (agent.lastResult && isSuccessfulCompletion && !background) {
             const lastResult = agent.lastResult;
             const effects = await perf.track("on_run_finished", async () => onFinished(lastResult, latestUserText, {
               source: "desktop",
@@ -1039,6 +1098,7 @@ export function registerAgUiIpc(
         }
         // 先保存未注入的已发送消息并释放守卫，再让渲染端处理终态及后续发送。
         await endLifecycle();
+        if (background) broadcastChatsChanged();
         // runtime_error 已在 next 回调发过 RUN_ERROR，complete 不再补发终态事件。
         if (settlement?.status === "runtime_error") {
           pendingRunFinishedEvent = null;
@@ -1061,9 +1121,11 @@ export function registerAgUiIpc(
     // 这样避免 invoke reply 与 send 事件的投递顺序竞争导致 offEvent 提前取消监听。
     return { success: true, runId };
     } catch (error) {
+      backgroundRunControllers.delete(runAbortController);
       if (admitted) await database.call("runs.terminal", runId, "failed", Date.now(), (error as Error).message).catch(failure => console.error("[AgUiBridge] 失败回执写入失败:", failure));
       releaseSessionGuard?.();
       endConversation();
+      inbox.kick(sessionId);
       throw error;
     }
     } catch (error) {
@@ -1072,7 +1134,9 @@ export function registerAgUiIpc(
       if (input.sessionId && requestId) await getConversationDatabase(app.getPath("userData")).call("runs.failRequest", input.sessionId, requestId, (error as Error).message).catch(failure => console.error("[AgUiBridge] 接纳准备失败回执写入失败:", failure));
       throw error;
     }
-  });
+  };
+  // 后台结束派发只能由主进程发起，渲染端输入不能指定这一标记。
+  ipc.handle(IPC.AGUI_RUN, (event: IpcMainInvokeEvent, rawInput: unknown) => dispatchRun(event, rawInput));
 
   ipc.handle(IPC.AGUI_CANCEL, (_event, runId?: string) => {
     // 通过 abort signal 触发 harness 的 cancelled 流程，
@@ -1081,6 +1145,9 @@ export function registerAgUiIpc(
     // RUN_FINISHED → complete 回调清理 activeRuns + endLifecycle。
     // 每个 run 持有独立 AbortController，cancel 一个 runId 绝不影响其他 run。
     const abortRun = (id: string): void => {
+      for (const [sessionId, active] of sessionActiveRuns) {
+        if (active.runId === id) inbox.suppressWake(sessionId);
+      }
       const run = activeRuns.get(id);
       if (run && !run.abortController.signal.aborted) {
         run.abortController.abort();

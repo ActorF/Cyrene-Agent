@@ -258,6 +258,7 @@ export type TranscriptArchiveRef = {
 };
 
 export type TranscriptEntry =
+  | (TranscriptEnvelopeBase & { kind: "background_event"; payload: { jobId: string; message: CanonicalChatMessage } })
   | (TranscriptEnvelopeBase & { kind: "user"; payload: TranscriptUserPayload })
   | (TranscriptEnvelopeBase & { kind: "assistant"; payload: CanonicalChatMessage })
   | (TranscriptEnvelopeBase & {
