@@ -1402,6 +1402,29 @@ describe("权威轨迹上下文源（CTA Phase 1）", () => {
     expect(built.options.cleanMessages).toContainEqual(expect.objectContaining({ content: expect.stringContaining("<cyrene_compaction_checkpoint>") }))
   })
 
+  it("background preflight compaction receives the run cancellation signal", async () => {
+    const deps = createBuildDeps()
+    deps.loadModelSettings = () => ({ provider: "test", baseUrl: "https://example.test", model: "m", apiKey: "k", contextWindowTokens: 10_000 })
+    const controller = new AbortController()
+    let received: AbortSignal | undefined
+    let release!: () => void
+    deps.compactTranscript = vi.fn(async ({ signal }) => {
+      received = signal
+      await new Promise<void>(resolve => { release = resolve; signal?.addEventListener("abort", resolve, { once: true }) })
+      throw new Error("cancelled")
+    })
+    const building = buildAgentRunOptions({ sessionId: "preflight", signal: controller.signal,
+      modelContext: { messages: [{ role: "user", content: "历史".repeat(2_000) }], uncertainEffects: [], throughSeq: 8 },
+    } as never, deps)
+    const rejected = expect(building).rejects.toThrow("TRANSCRIPT_COMPACTION_REQUIRED")
+    try {
+      await vi.waitFor(() => expect(deps.compactTranscript).toHaveBeenCalled())
+      expect(received).toBe(controller.signal)
+      controller.abort()
+      expect(received?.aborted).toBe(true)
+    } finally { release(); await rejected }
+  })
+
   it("自动 compaction 摘要失败时对外只报告 TRANSCRIPT_COMPACTION_REQUIRED", async () => {
     const deps = createBuildDeps()
     deps.loadModelSettings = () => ({

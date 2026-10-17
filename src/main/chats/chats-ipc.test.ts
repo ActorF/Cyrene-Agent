@@ -637,6 +637,41 @@ describe("chats IPC mode filtering", () => {
     expect(await store.getSessionRecord(session.id)).toBeNull();
   });
 
+  it.each(["false", "throw", "success"])("restores the deletion suspension only on rollback: %s", async outcome => {
+    const { registerChatsIpc } = await import("./chats-ipc");
+    const store = await import("./chats-store");
+    const rollback = vi.fn();
+    await registerChatsIpc(undefined, { beforeSessionDelete: async () => rollback });
+    const event = { sender: {} };
+    const session = await mocks.handlers.get(IPC.CHATS_CREATE)!(event, { mode: "code" }) as { id: string };
+    const deletion = vi.spyOn(store, "deleteSession");
+    if (outcome === "false") deletion.mockResolvedValueOnce(false);
+    if (outcome === "throw") deletion.mockRejectedValueOnce(new Error("DELETE_FAILED"));
+    try {
+      const deleting = mocks.handlers.get(IPC.CHATS_DELETE)!(event, session.id);
+      if (outcome === "throw") await expect(deleting).rejects.toThrow("DELETE_FAILED");
+      else expect(await deleting).toBe(outcome === "success");
+      expect(rollback).toHaveBeenCalledTimes(outcome === "success" ? 0 : 1);
+    } finally { deletion.mockRestore(); }
+  });
+
+  it("restores completion wakeups when wiki tombstoning fails", async () => {
+    const { registerChatsIpc } = await import("./chats-ipc");
+    const wiki = await import("../memory/wiki-memory-scheduler");
+    const store = await import("./chats-store");
+    const rollback = vi.fn();
+    await registerChatsIpc(undefined, { beforeSessionDelete: async () => rollback });
+    const event = { sender: {} };
+    const session = await mocks.handlers.get(IPC.CHATS_CREATE)!(event, { mode: "code" }) as { id: string };
+    fs.mkdirSync(path.join(mocks.userDataDir, "memory", "wiki"), { recursive: true });
+    const getter = vi.spyOn(wiki, "getWikiMemoryStore").mockReturnValue({ tombstoneConversation: async () => { throw new Error("WIKI_FAILED"); } } as never);
+    try {
+      expect(await mocks.handlers.get(IPC.CHATS_DELETE)!(event, session.id)).toBe(false);
+      expect(rollback).toHaveBeenCalledOnce();
+      expect(await store.getSessionRecord(session.id)).not.toBeNull();
+    } finally { getter.mockRestore(); }
+  });
+
   it("does not tombstone a conversation when background cancellation fails", async () => {
     const { registerChatsIpc } = await import("./chats-ipc");
     const store = await import("./chats-store");

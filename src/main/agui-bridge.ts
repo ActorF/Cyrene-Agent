@@ -56,7 +56,7 @@ import {
 import { cancelPendingApprovalsForRun } from "./permission";
 import { cancelPendingQuizzesForRun, takeQuizEvidenceForRun } from "./orchestrator/pop-quiz";
 import type { PluginPromptMode, PluginTurnCompletedEvent } from "../plugins/types";
-import { ShellCompletionDispatcher } from "./orchestrator/shell-completion-dispatcher";
+import { ShellCompletionDispatcher, type ShellCompletion } from "./orchestrator/shell-completion-dispatcher";
 
 let shellCompletions: ShellCompletionDispatcher | undefined;
 const backgroundRunControllers = new Map<AbortController, Promise<void>>();
@@ -194,7 +194,7 @@ export interface AguiRunInput {
 }
 
 /** 调用方（index.ts）注入：把输入转成 agent 需要的 options（含 system prompt 拼接）。 */
-export type BuildOptionsFn = (input: AguiRunInput) => Promise<{
+export type BuildOptionsFn = (input: AguiRunInput & { signal?: AbortSignal }) => Promise<{
   options: CyreneRunOptions;
   /** 跑完后副作用需要的信息。 */
   latestUserText: string;
@@ -255,6 +255,8 @@ export function __hasActiveRunForTest(runId: string): boolean {
 interface SessionActiveRun {
   runId: string;
   background: boolean;
+  completions: Map<string, ShellCompletion>;
+  retireCompletions: () => Promise<void>;
   /** 触发该 run 的 cancelled 流程（复用 AGUI_CANCEL 同款 abort 链路）。 */
   abort: () => void;
   /** run 终态结算完成（endLifecycle 释放守卫时 resolve）；takeover 等它保证旧 run checkpoint 已落盘。 */
@@ -270,6 +272,15 @@ export async function cancelBackgroundConversationRun(sessionId: string): Promis
   if (!run?.background) return;
   run.abort();
   await run.settled;
+  await run.retireCompletions();
+}
+
+/** 删除失败时由 IPC 回滚临时唤醒抑制。 */
+export async function prepareBackgroundSessionDelete(sessionId: string): Promise<() => void> {
+  const rollback = shellCompletions?.suspendWake(sessionId) ?? (() => {});
+  try { await cancelBackgroundConversationRun(sessionId); }
+  catch (error) { rollback(); throw error; }
+  return rollback;
 }
 
 /** 单次 takeover 等待旧 run 结算的时间上限：结算链路自身故障时超时回顶部重检，而非无限挂起。 */
@@ -364,6 +375,19 @@ export function registerAgUiIpc(
 
   const onFinished = onRunFinished;
   const previousDispatchDisposed = disposeShellCompletionDispatch();
+  const retireCompletion = async (completion: ShellCompletion) => {
+    if (!await chatsStore.getSession(completion.conversationId)) {
+      inbox.discard(completion.conversationId);
+      return;
+    }
+    const entries = await transcriptStore.readAuditEntries(completion.conversationId);
+    const source = entries.find(entry => entry.kind === "background_event" && entry.payload.jobId === completion.snapshot.jobId)
+      ?? entries.find(entry => entry.kind === "background_event_pending" && entry.payload.jobId === completion.snapshot.jobId);
+    await transcriptStore.append(completion.conversationId, {
+      kind: "background_event_retired", id: `shell-retired:${completion.snapshot.jobId}`,
+      at: Date.now(), runId: completion.sourceRunId, payload: { jobId: completion.snapshot.jobId, sourceSeq: source?.seq },
+    });
+  };
   const inbox = new ShellCompletionDispatcher({
     append: async (completion, message) => {
       await previousDispatchDisposed;
@@ -372,23 +396,22 @@ export function registerAgUiIpc(
         return;
       }
       await transcriptStore.append(completion.conversationId, {
-        kind: "background_event", id: `shell-completed:${completion.snapshot.jobId}`,
+        kind: "background_event_pending", id: `shell-completed:${completion.snapshot.jobId}`,
         at: message.internal!.createdAt, runId: completion.sourceRunId,
         payload: { jobId: completion.snapshot.jobId, sourceWorkspace: completion.sourceWorkspace, message },
       });
     },
-    retire: async completion => {
-      if (!await chatsStore.getSession(completion.conversationId)) {
-        inbox.discard(completion.conversationId);
-        return;
-      }
-      const source = (await transcriptStore.readAuditEntries(completion.conversationId)).find(entry =>
-        entry.kind === "background_event" && entry.payload.jobId === completion.snapshot.jobId);
+    deliver: async (completion, message) => {
+      const run = sessionActiveRuns.get(completion.conversationId);
+      if (run?.background) run.completions.set(completion.snapshot.jobId, completion);
+      // 收件事实不参与模型顺序；仅在请求边界提交可重放的投递位置。
       await transcriptStore.append(completion.conversationId, {
-        kind: "background_event_retired", id: `shell-retired:${completion.snapshot.jobId}`,
-        at: Date.now(), runId: completion.sourceRunId, payload: { jobId: completion.snapshot.jobId, sourceSeq: source?.seq },
+        kind: "background_event", id: "shell-delivered:" + completion.snapshot.jobId,
+        at: message.internal!.createdAt, runId: completion.sourceRunId,
+        payload: { jobId: completion.snapshot.jobId, sourceWorkspace: completion.sourceWorkspace, message },
       });
     },
+    retire: retireCompletion,
     isBusy: sessionId => sessionActiveRuns.has(sessionId),
     canDeliver: async completion => completion.sourceWorkspace === shellWorkspaceIdentity(
       (await chatsStore.getSession(completion.conversationId))?.workspaceBinding),
@@ -520,9 +543,14 @@ export function registerAgUiIpc(
         let resolveSettled!: () => void;
         const settled = new Promise<void>((resolve) => { resolveSettled = resolve; });
         // 并发 takeover 中只有一个能走到这里（await 醒来后必须回顶部重新竞争）
+        const completions = new Map<string, ShellCompletion>();
         sessionActiveRuns.set(sessionId, {
           runId,
           background,
+          completions,
+          retireCompletions: async () => {
+            for (const completion of completions.values()) await retireCompletion(completion);
+          },
           abort: () => runAbortController.abort(),
           settled,
         });
@@ -571,6 +599,7 @@ export function registerAgUiIpc(
     // renderer 的 messages（即使恶意/旧版载荷仍携带）永远不参与模型上下文。
     let modelContext: MaterializedTranscript | undefined;
     if (background) {
+      await inbox.prepare(sessionId);
       modelContext = await journal.buildModelContext(sessionId);
     }
     if (currentUser) {
@@ -685,15 +714,13 @@ export function registerAgUiIpc(
       modelProfileId: session.modelProfileId,
       sessionModelSettings,
       executionMode: agentExecutionMode,
+      signal: runAbortController.signal,
       ...(background ? { modelContext } : {}),
     }));
     } catch (error) {
       perf.dump();
       // run 未开跑即失败：清掉这期间可能落下的插话标记，条目回普通队列
       try { (await chatsStore.resetPendingAdjustByRun(sessionId, runId)); } catch { /* 复位尽力而为 */ }
-      releaseSessionGuard?.();
-      releaseSessionGuard = null;
-      endConversation();
       throw error;
     }
     const { options, latestUserText } = built;

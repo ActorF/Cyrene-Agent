@@ -1608,6 +1608,42 @@ describe("agui-bridge background shell smoke (mock sessions, isolated SQLite)", 
     return mocks.runCyreneAgent.mock.calls[0][0] as import("./orchestrator/cyrene-agent").CyreneRunOptions;
   }
 
+  it("persists busy completions at delivery after the unrelated assistant response", async () => {
+    mocks.skipDefaultRunFinished = true; mocks.neverComplete = true; mocks.completeOnAbort = true;
+    const original = await start();
+    const { getConversationTranscriptStore } = await import("./orchestrator/conversation-transcript-store");
+    const { ConversationJournalService } = await import("./orchestrator/conversation-journal-service");
+    const store = getConversationTranscriptStore(mocks.userDataRoot);
+    const journal = new ConversationJournalService({ store });
+    original.onShellJobComplete!(snapshot("busy-result"));
+    await expect.poll(async () => (await store.readAuditEntries("original")).length).toBeGreaterThan(0);
+    expect(JSON.stringify((await journal.buildModelContext("original")).messages)).not.toContain("busy-result");
+    await store.append("original", { kind: "assistant", id: "unrelated-response", at: 1, payload: { role: "assistant", content: "UNRELATED_RESPONSE" } });
+    const delivered = await original.pollShellCompletions!();
+    expect(delivered).toHaveLength(1);
+    await store.append("original", { kind: "assistant", id: "follow-up", at: 2, payload: { role: "assistant", content: "FOLLOW_UP" } });
+    const replay = (await journal.buildModelContext("original")).messages.map(message => message.content);
+    expect(replay).toEqual(["UNRELATED_RESPONSE", delivered[0].content, "FOLLOW_UP"]);
+    const { buildCompactionSourceView } = await import("./orchestrator/conversation-transcript-projection");
+    const compacting = buildCompactionSourceView((await store.read("original")).entries, { get: () => null });
+    expect(compacting.messages.map(message => message.content)).toEqual(replay);
+    expect(await original.pollShellCompletions!()).toEqual([]);
+  });
+
+  it("a rolled-back deletion resumes queued and future automatic completions", async () => {
+    const original = await start();
+    await expect.poll(() => bridge.__getSessionActiveRunForTest("original")).toBeUndefined();
+    const rollback = await bridge.prepareBackgroundSessionDelete("original");
+    original.onShellJobComplete!(snapshot("during-delete"));
+    await new Promise(resolve => setTimeout(resolve, 40));
+    expect(mocks.runCyreneAgent).toHaveBeenCalledTimes(1);
+    rollback();
+    await expect.poll(() => mocks.runCyreneAgent.mock.calls.length).toBe(2);
+    await expect.poll(() => bridge.__getSessionActiveRunForTest("original")).toBeUndefined();
+    original.onShellJobComplete!(snapshot("after-rollback"));
+    await expect.poll(() => mocks.runCyreneAgent.mock.calls.length).toBe(3);
+  });
+
   it("idle completion wakes the original conversation and provides durable result context without a fake user turn", async () => {
     const original = await start();
     await expect.poll(() => bridge.__getSessionActiveRunForTest("original")).toBeUndefined();
@@ -1635,7 +1671,7 @@ describe("agui-bridge background shell smoke (mock sessions, isolated SQLite)", 
     mocks.getSession.mockImplementation((id: string) => ({ id, mode, messages: [] }));
     original.onShellJobComplete!(snapshot());
     const { getConversationTranscriptStore } = await import("./orchestrator/conversation-transcript-store");
-    await expect.poll(async () => (await getConversationTranscriptStore(mocks.userDataRoot).read("original")).entries.filter(entry => entry.kind === "background_event").length).toBe(1);
+    await expect.poll(async () => (await getConversationTranscriptStore(mocks.userDataRoot).read("original")).entries.filter(entry => entry.kind === "background_event_pending").length).toBe(1);
     // 等待超过重试间隔，确保没有继续读取会话或遗留待投递事件。
     await new Promise(resolve => setTimeout(resolve, 100));
     const reads = mocks.getSession.mock.calls.length;
@@ -1643,7 +1679,7 @@ describe("agui-bridge background shell smoke (mock sessions, isolated SQLite)", 
     expect(mocks.getSession.mock.calls.length).toBe(reads);
     expect(mocks.runCyreneAgent).toHaveBeenCalledTimes(1);
     expect(await original.pollShellCompletions!()).toEqual([]);
-    expect((await getConversationTranscriptStore(mocks.userDataRoot).read("original")).entries[0].kind).toBe("background_event");
+    expect((await getConversationTranscriptStore(mocks.userDataRoot).read("original")).entries[0].kind).toBe("background_event_pending");
   });
 
   it.each(["code", "work", "learn"])("keeps a %s completion durable without waking a rebound workspace", async mode => {
@@ -1655,12 +1691,12 @@ describe("agui-bridge background shell smoke (mock sessions, isolated SQLite)", 
       workspaceBinding: { workspaceRoot: path.join(mocks.userDataRoot, "B"), displayName: "B", boundAt: 2 } }));
     original.onShellJobComplete!(snapshot());
     const { getConversationTranscriptStore } = await import("./orchestrator/conversation-transcript-store");
-    await expect.poll(async () => (await getConversationTranscriptStore(mocks.userDataRoot).read("original")).entries.filter(entry => entry.kind === "background_event").length).toBe(1);
+    await expect.poll(async () => (await getConversationTranscriptStore(mocks.userDataRoot).read("original")).entries.filter(entry => entry.kind === "background_event_pending").length).toBe(1);
     await new Promise(resolve => setTimeout(resolve, 100));
     expect(mocks.runCyreneAgent).toHaveBeenCalledTimes(1);
     await bridge.disposeShellCompletionDispatch();
     const entries = (await getConversationTranscriptStore(mocks.userDataRoot).read("original")).entries;
-    expect(entries.filter(entry => entry.kind === "background_event")).toHaveLength(1);
+    expect(entries.filter(entry => entry.kind === "background_event_pending")).toHaveLength(1);
     expect(JSON.stringify(entries)).toContain("sourceWorkspace");
     expect(mocks.runCyreneAgent).toHaveBeenCalledTimes(1);
   });
@@ -1675,7 +1711,7 @@ describe("agui-bridge background shell smoke (mock sessions, isolated SQLite)", 
     original.onShellJobComplete!(snapshot("job-A"));
     const { getConversationTranscriptStore } = await import("./orchestrator/conversation-transcript-store");
     const store = getConversationTranscriptStore(mocks.userDataRoot);
-    await expect.poll(async () => (await store.read("original")).entries.some(entry => entry.kind === "background_event")).toBe(true);
+    await expect.poll(async () => (await store.read("original")).entries.some(entry => entry.kind === "background_event_pending")).toBe(true);
     await expect.poll(() => original.pollShellCompletions!()).toEqual([]);
     await mocks.handlers.get(IPC.AGUI_RUN)!({}, { sessionId: "original", assistantTurnId: "initial-B" });
     await expect.poll(() => bridge.__getSessionActiveRunForTest("original")).toBeUndefined();
@@ -1686,10 +1722,10 @@ describe("agui-bridge background shell smoke (mock sessions, isolated SQLite)", 
     expect(JSON.stringify(resumed.messages)).toContain("job-B");
     expect(JSON.stringify(resumed.messages)).not.toContain("job-A");
     const entries = await store.readAuditEntries("original");
-    expect(entries.filter(entry => entry.kind === "background_event")).toHaveLength(2);
+    expect(entries.filter(entry => entry.kind === "background_event_pending")).toHaveLength(2);
     expect(entries).toContainEqual(expect.objectContaining({ kind: "background_event_retired", payload: { jobId: "job-A",
-      sourceSeq: entries.find(entry => entry.kind === "background_event" && entry.payload.jobId === "job-A")!.seq } }));
-    expect(entries).toContainEqual(expect.objectContaining({ kind: "background_event", payload: expect.objectContaining({
+      sourceSeq: entries.find(entry => entry.kind === "background_event_pending" && entry.payload.jobId === "job-A")!.seq } }));
+    expect(entries).toContainEqual(expect.objectContaining({ kind: "background_event_pending", payload: expect.objectContaining({
       jobId: "job-A", sourceWorkspace: JSON.stringify([mocks.userDataRoot, 1]),
     }) }));
   });
@@ -1725,6 +1761,9 @@ describe("agui-bridge background shell smoke (mock sessions, isolated SQLite)", 
     const { getConversationTranscriptStore } = await import("./orchestrator/conversation-transcript-store");
     expect((await getConversationTranscriptStore(mocks.userDataRoot).read("original")).entries)
       .toContainEqual(expect.objectContaining({ kind: "interruption", runId: resumed.runId }));
+    const { ConversationJournalService } = await import("./orchestrator/conversation-journal-service");
+    const context = await new ConversationJournalService({ store: getConversationTranscriptStore(mocks.userDataRoot) }).buildModelContext("original");
+    expect(JSON.stringify(context.messages)).not.toContain("job-smoke");
     const count = mocks.runCyreneAgent.mock.calls.length;
     original.onShellJobComplete!(snapshot("late-old-workspace"));
     await new Promise(resolve => setTimeout(resolve, 50));
@@ -1902,6 +1941,33 @@ describe("agui-bridge background shell smoke (mock sessions, isolated SQLite)", 
     await stopping;
     expect(mocks.runCyreneAgent).toHaveBeenCalledTimes(1);
     expect(bridge.__getSessionActiveRunForTest("original")).toBeUndefined();
+  });
+
+  it.each(["rebind", "delete", "shutdown"])("cancels background preflight before waiting for %s settlement", async action => {
+    let preparationSignal: AbortSignal | undefined;
+    let release!: () => void;
+    bridge.registerAgUiIpc(async input => {
+      if (input.modelContext) {
+        preparationSignal = input.signal;
+        await new Promise<void>(resolve => { release = resolve; input.signal?.addEventListener("abort", () => resolve(), { once: true }); });
+        throw new Error("PREFLIGHT_ABORTED");
+      }
+      return { options: { settings: { provider: "test", baseUrl: "", model: "fake", apiKey: "" },
+        messages: [], toolSystemContent: "TOOL", soulSystemBaseContent: "SOUL" }, latestUserText: "fixture" };
+    }, async () => {}, () => null);
+    const original = await start();
+    await expect.poll(() => bridge.__getSessionActiveRunForTest("original")).toBeUndefined();
+    original.onShellJobComplete!(snapshot());
+    await expect.poll(() => typeof release).toBe("function");
+    let stopping: Promise<unknown> | undefined;
+    try {
+      stopping = action === "shutdown" ? bridge.disposeShellCompletionDispatch()
+        : action === "delete" ? bridge.prepareBackgroundSessionDelete("original") : bridge.cancelBackgroundConversationRun("original");
+      expect(preparationSignal?.aborted).toBe(true);
+      await stopping;
+      expect(bridge.__getSessionActiveRunForTest("original")).toBeUndefined();
+      expect(mocks.runCyreneAgent).toHaveBeenCalledTimes(1);
+    } finally { release(); await stopping; }
   });
 
   it("backs off persistent background preparation failures instead of immediately admitting retries", async () => {

@@ -156,7 +156,7 @@ export async function registerChatsIpc(
     isPrimaryModelBusy?: () => boolean;
     transcriptCompactor?: ConversationTranscriptCompactor;
     beforeWorkspaceBindingChange?: (sessionId: string) => Promise<void>;
-    beforeSessionDelete?: (sessionId: string) => Promise<void>;
+    beforeSessionDelete?: (sessionId: string) => Promise<void | (() => void)>;
   } = {},
 ): Promise<void> {
   const ipc = ipcOption ?? createIpcScope();
@@ -381,7 +381,9 @@ export async function registerChatsIpc(
   ipc.handle(IPC.CHATS_DELETE, async (event, id: string) => {
     if (!id) return false;
     const sessionRecord = (await chatsStore.getSessionRecord(id));
-    await options.beforeSessionDelete?.(id);
+    const rollbackBackground = await options.beforeSessionDelete?.(id);
+    let deleted = false;
+    try {
     await cancelSummaryMemorySession(id);
     await cancelWikiMemorySession(id);
     const wikiStore = fs.existsSync(path.join(app.getPath("userData"), "memory", "wiki"))
@@ -409,6 +411,7 @@ export async function registerChatsIpc(
     let ok: boolean;
     try {
       ok = (await chatsStore.deleteSession(id));
+      deleted = ok;
       if (!ok) await wikiStore?.untombstoneConversation(id);
     } catch (error) {
       await wikiStore?.untombstoneConversation(id).catch((rollbackError) =>
@@ -461,6 +464,9 @@ export async function registerChatsIpc(
       broadcastChanged(event.sender);
     }
     return ok;
+    } finally {
+      if (!deleted) rollbackBackground?.();
+    }
   });
 
   ipc.handle(IPC.CHATS_SET_PINNED, async (event, payload: { id: string; pinned: boolean }) => {

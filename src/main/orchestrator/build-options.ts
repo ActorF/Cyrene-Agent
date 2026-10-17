@@ -193,7 +193,7 @@ export interface BuildOptionsDeps {
 }
 
 /** 所有入口都从 canonical journal 构建上下文；不再接受旁路历史消息。 */
-export type BuildOptionsInput = AguiRunInput;
+export type BuildOptionsInput = AguiRunInput & { signal?: AbortSignal };
 
 /** onRunFinished 副作用所需的 deps（与 BuildOptionsDeps 部分重叠） */
 export interface OnRunFinishedDeps {
@@ -630,6 +630,7 @@ export async function buildAgentRunOptions(
           trigger: "automatic",
           retainTokens: Math.max(1, Math.floor(contextWindowTokens * DEFAULT_HARNESS_CONFIG.compactionRetainRatio)),
           modelSettings: settings,
+          signal: input.signal,
         });
       } catch (error) {
         console.error("[BuildOptions] transcript compaction failed", error);

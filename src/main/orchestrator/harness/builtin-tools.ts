@@ -714,7 +714,7 @@ export function isHarnessBuiltin(toolName: string): boolean {
 
 export function isInteractiveHarnessBuiltin(toolName: string): boolean {
   return toolName === ASK_USER_TOOL_ID || toolName === CONFIRM_UNCERTAIN_EFFECT_TOOL_ID
-    || toolName === SUBMIT_PLAN_TOOL_ID;
+    || toolName === ENTER_PLAN_MODE_TOOL_ID || toolName === WRITE_PLAN_TOOL_ID || toolName === SUBMIT_PLAN_TOOL_ID;
 }
 
 /**

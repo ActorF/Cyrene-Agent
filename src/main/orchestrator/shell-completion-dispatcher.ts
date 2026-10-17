@@ -28,9 +28,21 @@ export class ShellCompletionDispatcher {
   private timers = new Map<string, ReturnType<typeof setTimeout>>();
   private stopped = false;
   private wakeBlocked = new Set<string>();
+  private deletionSuspended = new Set<string>();
 
   suppressWake(conversationId: string): void { this.wakeBlocked.add(conversationId); }
-  resume(conversationId: string): void { this.wakeBlocked.delete(conversationId); }
+  resume(conversationId: string): void { this.wakeBlocked.delete(conversationId); this.kick(conversationId); }
+
+  /** 删除失败时恢复原来的唤醒状态；不覆盖用户此前主动停止的设置。 */
+  suspendWake(conversationId: string): () => void {
+    const blocked = this.wakeBlocked.has(conversationId);
+    this.deletionSuspended.add(conversationId);
+    this.suppressWake(conversationId);
+    return () => {
+      this.deletionSuspended.delete(conversationId);
+      if (!blocked) this.resume(conversationId);
+    };
+  }
 
   canWake(conversationId: string): boolean {
     return !this.stopped && !this.wakeBlocked.has(conversationId)
@@ -39,6 +51,7 @@ export class ShellCompletionDispatcher {
 
   constructor(private readonly deps: {
     append(event: ShellCompletion, message: ChatMessage): Promise<void>;
+    deliver?(event: ShellCompletion, message: ChatMessage): Promise<void>;
     isBusy(conversationId: string): boolean;
     wake(conversationId: string, eventId: string, event: ShellCompletion): Promise<void>;
     canDeliver?(event: ShellCompletion): Promise<boolean>;
@@ -85,7 +98,7 @@ export class ShellCompletionDispatcher {
   }
 
   /** 仅在持有会话运行锁时，于模型请求边界消费事件。 */
-  async take(conversationId: string): Promise<ChatMessage[]> {
+  async prepare(conversationId: string): Promise<ChatMessage[]> {
     if (this.stopped) return [];
     await this.save(conversationId);
     await this.retireMismatched(conversationId);
@@ -93,12 +106,17 @@ export class ShellCompletionDispatcher {
     if (!queue) return [];
     // 等待持久化期间可能收到新事件，因此只移除已保存的条目。
     const messages: ChatMessage[] = [];
-    for (const [id, item] of queue) {
+    for (const item of queue.values()) {
       if (!item.saved) continue;
+      await this.deps.deliver?.(item.event, item.message);
       messages.push(item.message);
-      queue.delete(id);
     }
-    if (!queue.size) this.pending.delete(conversationId);
+    return messages;
+  }
+
+  async take(conversationId: string): Promise<ChatMessage[]> {
+    const messages = await this.prepare(conversationId);
+    this.acknowledge(conversationId, new Set(messages.map(message => message.internal!.id)));
     return messages;
   }
 
@@ -135,7 +153,7 @@ export class ShellCompletionDispatcher {
       const next = this.canWake(conversationId) ? [...queue?.values() ?? []].find(item => item.saved && !item.event.signal?.aborted) : undefined;
       if (next) await this.deps.wake(conversationId, next.event.snapshot.jobId, next.event);
       else if ([...queue?.values() ?? []].some(item => !item.saved)) this.kick(conversationId);
-      else this.pending.delete(conversationId); // 取消后只保留持久化事实，不自行重启会话。
+      else if (!this.deletionSuspended.has(conversationId)) this.pending.delete(conversationId); // 暂停期间保留队列，删除回滚可恢复唤醒。
     } catch (error) {
       this.deps.onError(error);
       this.kick(conversationId, 1_000);
@@ -151,6 +169,7 @@ export class ShellCompletionDispatcher {
     for (const timer of this.timers.values()) clearTimeout(timer);
     this.timers.clear();
     this.wakeBlocked.clear();
+    this.deletionSuspended.clear();
     // 停止唤醒后仍须保存未启动定时器的队列，并等待在途写入遍历完其余条目。
     const results = await Promise.allSettled([
       ...[...this.pending.keys()].map(async id => { await this.save(id); await this.retireMismatched(id); }), ...this.operations,

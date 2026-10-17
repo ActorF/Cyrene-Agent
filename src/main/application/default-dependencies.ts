@@ -115,7 +115,7 @@ import { TtsSessionService } from "../tts/tts-session-service";
 import { registerTtsIpc } from "../tts/tts-ipc";
 import { loadUserProfile } from "../settings-store";
 import { getAppIconPath } from "../app-icon";
-import { cancelBackgroundConversationRun, disposeShellCompletionDispatch, hasActiveConversationRun, registerAgUiIpc } from "../agui-bridge";
+import { prepareBackgroundSessionDelete, cancelBackgroundConversationRun, disposeShellCompletionDispatch, hasActiveConversationRun, registerAgUiIpc } from "../agui-bridge";
 import { updateLocaleContext } from "../locale-context";
 import { registerCallIpc } from "../call/call-manager";
 import { initSkills, skillRegistry } from "../skills";
@@ -705,7 +705,7 @@ export function createDefaultApplicationDependencies(): ApplicationDependencies 
           llmClient: services.llm,
           isPrimaryModelBusy: hasActiveConversationRun,
           beforeWorkspaceBindingChange: cancelBackgroundConversationRun,
-          beforeSessionDelete: cancelBackgroundConversationRun,
+          beforeSessionDelete: prepareBackgroundSessionDelete,
           transcriptCompactor,
         });
         await registerMomentsIpc(ipc);
