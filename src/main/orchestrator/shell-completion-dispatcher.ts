@@ -42,6 +42,7 @@ export class ShellCompletionDispatcher {
     isBusy(conversationId: string): boolean;
     wake(conversationId: string, eventId: string, event: ShellCompletion): Promise<void>;
     canDeliver?(event: ShellCompletion): Promise<boolean>;
+    retire?(event: ShellCompletion): Promise<void>;
     onError(error: unknown): void;
   }) {}
 
@@ -115,7 +116,10 @@ export class ShellCompletionDispatcher {
     if (!this.deps.canDeliver) return;
     const queue = this.pending.get(conversationId);
     for (const [id, item] of queue ?? []) {
-      if (item.saved && !await this.deps.canDeliver(item.event)) queue!.delete(id);
+      if (item.saved && !await this.deps.canDeliver(item.event)) {
+        await this.deps.retire?.(item.event);
+        queue!.delete(id);
+      }
     }
     if (queue && !queue.size) this.pending.delete(conversationId);
   }
@@ -149,7 +153,7 @@ export class ShellCompletionDispatcher {
     this.wakeBlocked.clear();
     // 停止唤醒后仍须保存未启动定时器的队列，并等待在途写入遍历完其余条目。
     const results = await Promise.allSettled([
-      ...[...this.pending.keys()].map(id => this.save(id)), ...this.operations,
+      ...[...this.pending.keys()].map(async id => { await this.save(id); await this.retireMismatched(id); }), ...this.operations,
     ]);
     const failures = results.filter(result => result.status === "rejected");
     if (failures.length) throw new AggregateError(failures.map(result => result.reason), "后台任务结束事件保存失败");

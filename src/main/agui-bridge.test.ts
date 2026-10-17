@@ -1635,7 +1635,7 @@ describe("agui-bridge background shell smoke (mock sessions, isolated SQLite)", 
     mocks.getSession.mockImplementation((id: string) => ({ id, mode, messages: [] }));
     original.onShellJobComplete!(snapshot());
     const { getConversationTranscriptStore } = await import("./orchestrator/conversation-transcript-store");
-    await expect.poll(async () => (await getConversationTranscriptStore(mocks.userDataRoot).read("original")).entries.length).toBe(1);
+    await expect.poll(async () => (await getConversationTranscriptStore(mocks.userDataRoot).read("original")).entries.filter(entry => entry.kind === "background_event").length).toBe(1);
     // 等待超过重试间隔，确保没有继续读取会话或遗留待投递事件。
     await new Promise(resolve => setTimeout(resolve, 100));
     const reads = mocks.getSession.mock.calls.length;
@@ -1655,7 +1655,7 @@ describe("agui-bridge background shell smoke (mock sessions, isolated SQLite)", 
       workspaceBinding: { workspaceRoot: path.join(mocks.userDataRoot, "B"), displayName: "B", boundAt: 2 } }));
     original.onShellJobComplete!(snapshot());
     const { getConversationTranscriptStore } = await import("./orchestrator/conversation-transcript-store");
-    await expect.poll(async () => (await getConversationTranscriptStore(mocks.userDataRoot).read("original")).entries.length).toBe(1);
+    await expect.poll(async () => (await getConversationTranscriptStore(mocks.userDataRoot).read("original")).entries.filter(entry => entry.kind === "background_event").length).toBe(1);
     await new Promise(resolve => setTimeout(resolve, 100));
     expect(mocks.runCyreneAgent).toHaveBeenCalledTimes(1);
     await bridge.disposeShellCompletionDispatch();
@@ -1663,6 +1663,34 @@ describe("agui-bridge background shell smoke (mock sessions, isolated SQLite)", 
     expect(entries.filter(entry => entry.kind === "background_event")).toHaveLength(1);
     expect(JSON.stringify(entries)).toContain("sourceWorkspace");
     expect(mocks.runCyreneAgent).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(["code", "work", "learn"])("does not replay retired A output when a %s completion in B wakes the conversation", async mode => {
+    mocks.getSession.mockImplementation((id: string) => ({ id, mode, messages: [],
+      workspaceBinding: { workspaceRoot: mocks.userDataRoot, displayName: "A", boundAt: 1 } }));
+    const original = await start();
+    await expect.poll(() => bridge.__getSessionActiveRunForTest("original")).toBeUndefined();
+    mocks.getSession.mockImplementation((id: string) => ({ id, mode, messages: [],
+      workspaceBinding: { workspaceRoot: path.join(mocks.userDataRoot, "B"), displayName: "B", boundAt: 2 } }));
+    original.onShellJobComplete!(snapshot("job-A"));
+    const { getConversationTranscriptStore } = await import("./orchestrator/conversation-transcript-store");
+    const store = getConversationTranscriptStore(mocks.userDataRoot);
+    await expect.poll(async () => (await store.read("original")).entries.some(entry => entry.kind === "background_event")).toBe(true);
+    await expect.poll(() => original.pollShellCompletions!()).toEqual([]);
+    await mocks.handlers.get(IPC.AGUI_RUN)!({}, { sessionId: "original", assistantTurnId: "initial-B" });
+    await expect.poll(() => bridge.__getSessionActiveRunForTest("original")).toBeUndefined();
+    const inB = mocks.runCyreneAgent.mock.calls[1][0] as typeof original;
+    inB.onShellJobComplete!(snapshot("job-B"));
+    await expect.poll(() => mocks.runCyreneAgent.mock.calls.length).toBe(3);
+    const resumed = mocks.runCyreneAgent.mock.calls[2][0] as typeof original;
+    expect(JSON.stringify(resumed.messages)).toContain("job-B");
+    expect(JSON.stringify(resumed.messages)).not.toContain("job-A");
+    const entries = await store.readAuditEntries("original");
+    expect(entries.filter(entry => entry.kind === "background_event")).toHaveLength(2);
+    expect(entries).toContainEqual(expect.objectContaining({ kind: "background_event_retired", payload: { jobId: "job-A" } }));
+    expect(entries).toContainEqual(expect.objectContaining({ kind: "background_event", payload: expect.objectContaining({
+      jobId: "job-A", sourceWorkspace: JSON.stringify([mocks.userDataRoot, 1]),
+    }) }));
   });
 
   it("rejects a workspace rebound during background option preparation", async () => {

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildFullModelContext,
+  buildCompactionSourceView,
   buildModelContextFromCompactedView,
   reduceTranscriptProjection,
   type TranscriptRunReader,
@@ -96,6 +97,25 @@ describe("conversation transcript projection", () => {
       payload: { anchorUserTurnId: "background-user", disposition: "keep_user", reason: "regenerate" } };
     expect(buildFullModelContext([...entries, rewind], noRuns).messages).toEqual([{ role: "user", content: "run a command" }]);
   });
+  it("excludes retired completions and their obsolete compaction summary from every model view", () => {
+    const first = user("workspace-user", "run a command");
+    const event: TranscriptEntry = { seq: ++nextSeq, id: "shell-completed:A", at: nextSeq, kind: "background_event",
+      payload: { jobId: "A", sourceWorkspace: "A", message: { role: "user", visibility: "internal", content: "workspace A output" } } };
+    const checkpoint: TranscriptEntry = { seq: ++nextSeq, id: "checkpoint-with-A", at: nextSeq, kind: "compaction_checkpoint",
+      payload: { baseThroughSeq: 0, sourceThroughSeq: event.seq, sourceDigest: "digest",
+        replacement: { role: "system", content: "summary of workspace A output" }, trigger: "automatic" } };
+    const retirement: TranscriptEntry = { seq: ++nextSeq, id: "shell-retired:A", at: nextSeq, kind: "background_event_retired",
+      payload: { jobId: "A" } };
+    const current: TranscriptEntry = { seq: ++nextSeq, id: "shell-completed:B", at: nextSeq, kind: "background_event",
+      payload: { jobId: "B", sourceWorkspace: "B", message: { role: "user", visibility: "internal", content: "workspace B output" } } };
+    const entries = [first, event, checkpoint, retirement, current];
+    for (const materialize of [buildFullModelContext, buildModelContextFromCompactedView, buildCompactionSourceView]) {
+      expect(materialize(entries, noRuns).messages).toEqual([{ role: "user", content: "run a command" }, current.payload.message]);
+    }
+    expect(entries).toContain(event);
+    expect(reduceTranscriptProjection(entries).messages.map(message => message.content).filter(Boolean)).toEqual(["run a command"]);
+  });
+
   it("墓碑移除目标 user 及其尾部但不删除更早 UI 历史", () => {
     nextSeq = 0;
     const result = reduceTranscriptProjection([

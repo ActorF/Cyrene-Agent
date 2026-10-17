@@ -147,6 +147,51 @@ describe("shell completion inbox", () => {
     expect(messages[0].content).toContain('"jobId":"job-2"');
   });
 
+  it("persists retirement when shutdown saves a queued completion after a workspace rebind", async () => {
+    vi.useFakeTimers();
+    const append = vi.fn();
+    const retire = vi.fn();
+    const wake = vi.fn();
+    const dispatcher = new ShellCompletionDispatcher({
+      append, retire, isBusy: () => false, wake, onError: vi.fn(), canDeliver: async () => false,
+    });
+    dispatchers.push(dispatcher);
+    const event = { ...completion(), sourceWorkspace: "A" };
+    dispatcher.enqueue(event);
+    await dispatcher.dispose();
+    expect(append).toHaveBeenCalledTimes(1);
+    expect(retire).toHaveBeenCalledWith(event);
+    expect(wake).not.toHaveBeenCalled();
+  });
+
+  it("persists retirement before removing a saved event and retries failed retirement", async () => {
+    vi.useFakeTimers();
+    let workspace = "A";
+    const retire = vi.fn(async () => {});
+    retire.mockRejectedValueOnce(new Error("retirement unavailable"));
+    const wake = vi.fn();
+    const onError = vi.fn();
+    const dispatcher = new ShellCompletionDispatcher({
+      append: vi.fn(), retire, isBusy: () => true, wake, onError,
+      canDeliver: async event => event.sourceWorkspace === workspace,
+    });
+    dispatchers.push(dispatcher);
+    const event = { ...completion(), sourceWorkspace: "A" };
+    dispatcher.enqueue(event);
+    await vi.advanceTimersByTimeAsync(1);
+    workspace = "B";
+    dispatcher.kick("original");
+    await vi.advanceTimersByTimeAsync(1);
+    expect(onError).toHaveBeenCalledTimes(1);
+    expect(dispatcher.canWake("original")).toBe(true);
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(retire).toHaveBeenCalledTimes(2);
+    expect(retire).toHaveBeenLastCalledWith(event);
+    expect(dispatcher.canWake("original")).toBe(false);
+    expect(await dispatcher.take("original")).toEqual([]);
+    expect(wake).not.toHaveBeenCalled();
+  });
+
   it("persists events arriving during workspace validation before waking them", async () => {
     const saved: string[] = [];
     const wake = vi.fn(async (id: string) => {

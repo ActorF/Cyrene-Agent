@@ -362,7 +362,17 @@ export function registerAgUiIpc(
       await transcriptStore.append(completion.conversationId, {
         kind: "background_event", id: `shell-completed:${completion.snapshot.jobId}`,
         at: message.internal!.createdAt, runId: completion.sourceRunId,
-        payload: { jobId: completion.snapshot.jobId, message },
+        payload: { jobId: completion.snapshot.jobId, sourceWorkspace: completion.sourceWorkspace, message },
+      });
+    },
+    retire: async completion => {
+      if (!await chatsStore.getSession(completion.conversationId)) {
+        inbox.discard(completion.conversationId);
+        return;
+      }
+      await transcriptStore.append(completion.conversationId, {
+        kind: "background_event_retired", id: `shell-retired:${completion.snapshot.jobId}`,
+        at: Date.now(), runId: completion.sourceRunId, payload: { jobId: completion.snapshot.jobId },
       });
     },
     isBusy: sessionId => sessionActiveRuns.has(sessionId),

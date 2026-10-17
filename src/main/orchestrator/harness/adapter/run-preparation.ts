@@ -81,7 +81,7 @@ export async function prepareHarnessRun(
   };
 
   const tools = [...(options.capabilities?.tools ?? options.tools ?? toolRegistry.getEnabledTools())]
-    .filter(tool => options.harnessInteractiveTools !== false || tool.id !== "pop_quiz");
+    .filter(tool => options.harnessInteractiveTools !== false || (tool.id !== "pop_quiz" && !tool.browserControlPhase));
   const runStore = getHarnessRunStore(app.getPath("userData"));
   // 消息历史与待办/未决副作用均来自会话轨迹投影；这里只为旧入口保留兼容文本提示。
   const baseRunMessages = options.messages;

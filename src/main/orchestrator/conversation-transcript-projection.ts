@@ -120,6 +120,12 @@ function reduceActiveTranscript(entries: TranscriptEntry[]): ActiveTranscript {
       case "background_event":
         nodes.push({ kind: "background_event", entry });
         break;
+      case "background_event_retired": {
+        // 原始结果保留在审计轨迹；退休后不再参与模型上下文或压缩。
+        const index = nodes.findIndex(node => node.kind === "background_event" && node.entry.payload.jobId === entry.payload.jobId);
+        if (index >= 0) nodes.splice(index, 1);
+        break;
+      }
       case "user":
         nodes.push({ kind: "user", entry, text: entry.payload.text });
         break;
