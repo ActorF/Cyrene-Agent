@@ -456,7 +456,7 @@ export function registerGmailTools(service: GmailService): void {
             `永久删除 Gmail 草稿？\n主题：${safePreview(current.message.subject, 200)}\n收件人：${current.message.to.join("、") || "（未填写）"}`,
             [{ label: "永久删除草稿", value: "delete" }, CANCEL_OPTION],
             "cancel",
-            { sensitive: true, suppressToast: true, signal: context?.signal, runId: context?.runId },
+            { sensitive: true, suppressToast: true, signal: context?.signal, runId: context?.runId, allowPrompt: context?.allowUserInteraction },
           );
           if (choice !== "delete") return "[gmail_manage_drafts] 用户取消删除草稿。";
           await service.deleteDraft(String(args.draftId ?? ""));

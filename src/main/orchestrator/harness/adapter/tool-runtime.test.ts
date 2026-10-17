@@ -28,7 +28,7 @@ vi.mock("electron", () => ({ app: { getPath: vi.fn(() => "C:\\cyrene-runtime") }
 import { prepareToolRuntime } from "./tool-runtime";
 
 /** 构造一次 code 模式 run 的 tool runtime（Plan Guard 生效条件：code/chat + isPlanReadOnly）。 */
-async function makeRuntime(permissionMode: "prompt" | "allow_all", allowPermissionPrompt?: boolean) {
+async function makeRuntime(permissionMode: "prompt" | "allow_all", allowPermissionPrompt?: boolean, harnessInteractiveTools?: boolean) {
   return prepareToolRuntime({
     options: {
       conversationId: "thread-1",
@@ -38,6 +38,7 @@ async function makeRuntime(permissionMode: "prompt" | "allow_all", allowPermissi
       requestUserClarification: vi.fn(async () => ({ answers: [] })),
       permissionMode,
       allowPermissionPrompt,
+      harnessInteractiveTools,
     } as never,
     signal: new AbortController().signal,
     prepared: {
@@ -53,6 +54,10 @@ async function makeRuntime(permissionMode: "prompt" | "allow_all", allowPermissi
 }
 
 describe("harness tool runtime", () => {
+  it.each([undefined, true, false])("passes interaction availability independently of allow_all (%s)", async interactive => {
+    const runtime = await makeRuntime("allow_all", false, interactive);
+    expect(runtime.toolContext.allowUserInteraction).toBe(interactive);
+  });
   beforeEach(() => {
     getById.mockReset();
     checkPermission.mockReset();

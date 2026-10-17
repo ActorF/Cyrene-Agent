@@ -81,6 +81,7 @@ export async function prepareToolRuntime(input: {
     mode: options.conversationMode,
     allowedSkillIds: options.capabilities?.skillIds,
     permissionMode: options.permissionMode,
+    allowUserInteraction: options.harnessInteractiveTools,
     onShellJobComplete: options.onShellJobComplete,
   };
   const toolOutputStore = new FileToolOutputStore(app.getPath("userData"));

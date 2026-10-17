@@ -42,6 +42,8 @@ export interface ToolContext {
   allowedSkillIds?: ReadonlySet<string>;
   /** 本轮工具执行权限策略；allow_all 仅用于用户显式开启的无审批渠道。 */
   permissionMode?: "normal" | "allow_all";
+  /** 当前运行是否具备用户交互界面；与工具权限档位相互独立。 */
+  allowUserInteraction?: boolean;
   /** 子任务的只读契约；独立于主代理当前权限档位。 */
   readOnly?: boolean;
   /** 仅供前台 run_shell 观察输出；异常不得影响命令执行。 */
