@@ -16,6 +16,33 @@ function setup(busy = false) {
 afterEach(async () => { for (const dispatcher of dispatchers.splice(0)) await dispatcher.dispose(); vi.useRealTimers(); });
 
 describe("shell completion inbox", () => {
+  it.each([false, true])("keeps overlapping mutation suspensions independent (commit=%s)", async commit => {
+    const { dispatcher, deps } = setup();
+    const first = dispatcher.suspendWake("original");
+    const second = dispatcher.suspendWake("original");
+    dispatcher.enqueue(completion());
+    await expect.poll(() => deps.append.mock.calls.length).toBe(1);
+    first(); first();
+    await new Promise(resolve => setTimeout(resolve, 30));
+    expect(dispatcher.canWake("original")).toBe(false);
+    expect(deps.wake).not.toHaveBeenCalled();
+    second(commit);
+    if (commit) {
+      await new Promise(resolve => setTimeout(resolve, 30));
+      expect(deps.wake).not.toHaveBeenCalled();
+    } else await expect.poll(() => deps.wake.mock.calls.length).toBe(1);
+  });
+
+  it("rolling back a mutation cannot clear a concurrent user cancellation", async () => {
+    const { dispatcher, deps } = setup();
+    const release = dispatcher.suspendWake("original");
+    dispatcher.suppressWake("original");
+    release();
+    dispatcher.enqueue(completion());
+    await expect.poll(() => deps.append.mock.calls.length).toBe(1);
+    expect(deps.wake).not.toHaveBeenCalled();
+    expect(dispatcher.canWake("original")).toBe(false);
+  });
   it("acknowledges only the prepared context and retains events arriving during preparation", async () => {
     const { dispatcher, deps } = setup(true);
     const saved: import("./vendors/types").ChatMessage[] = [];

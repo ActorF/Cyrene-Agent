@@ -195,6 +195,12 @@ function reduceActiveTranscript(entries: TranscriptEntry[]): ActiveTranscript {
   return { nodes, throughSeq };
 }
 
+/** 审计全量轨迹保留归档来源，用活动分支判断来源运行是否已被回退移除。 */
+export function isTranscriptRunSuperseded(entries: TranscriptEntry[], runId: string): boolean {
+  if (!entries.some(entry => entry.kind === "assistant" && entry.runId === runId)) return false;
+  return !reduceActiveTranscript(entries).nodes.some(node => node.kind === "assistant" && node.entry.runId === runId);
+}
+
 function syntheticToolMessage(call: ToolCall, outcome: "unknown" | "not_executed"): ChatMessage {
   return {
     role: "tool",

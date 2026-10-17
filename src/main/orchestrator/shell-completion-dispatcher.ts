@@ -28,24 +28,29 @@ export class ShellCompletionDispatcher {
   private timers = new Map<string, ReturnType<typeof setTimeout>>();
   private stopped = false;
   private wakeBlocked = new Set<string>();
-  private deletionSuspended = new Set<string>();
+  private wakeSuspensions = new Map<string, Set<symbol>>();
 
   suppressWake(conversationId: string): void { this.wakeBlocked.add(conversationId); }
   resume(conversationId: string): void { this.wakeBlocked.delete(conversationId); this.kick(conversationId); }
 
-  /** 删除失败时恢复原来的唤醒状态；不覆盖用户此前主动停止的设置。 */
-  suspendWake(conversationId: string): () => void {
-    const blocked = this.wakeBlocked.has(conversationId);
-    this.deletionSuspended.add(conversationId);
-    this.suppressWake(conversationId);
-    return () => {
-      this.deletionSuspended.delete(conversationId);
-      if (!blocked) this.resume(conversationId);
+  /** 每次会话变更独占一个暂停令牌，最后一个操作退出后才允许唤醒。 */
+  suspendWake(conversationId: string): (committed?: boolean) => void {
+    let owners = this.wakeSuspensions.get(conversationId);
+    if (!owners) this.wakeSuspensions.set(conversationId, owners = new Set());
+    const token = Symbol();
+    owners.add(token);
+    return (committed = false) => {
+      if (!owners.delete(token)) return;
+      if (committed) this.suppressWake(conversationId);
+      if (!owners.size) {
+        this.wakeSuspensions.delete(conversationId);
+        this.kick(conversationId);
+      }
     };
   }
 
   canWake(conversationId: string): boolean {
-    return !this.stopped && !this.wakeBlocked.has(conversationId)
+    return !this.stopped && !this.wakeBlocked.has(conversationId) && !this.wakeSuspensions.has(conversationId)
       && [...this.pending.get(conversationId)?.values() ?? []].some(item => !item.event.signal?.aborted);
   }
 
@@ -153,7 +158,7 @@ export class ShellCompletionDispatcher {
       const next = this.canWake(conversationId) ? [...queue?.values() ?? []].find(item => item.saved && !item.event.signal?.aborted) : undefined;
       if (next) await this.deps.wake(conversationId, next.event.snapshot.jobId, next.event);
       else if ([...queue?.values() ?? []].some(item => !item.saved)) this.kick(conversationId);
-      else if (!this.deletionSuspended.has(conversationId)) this.pending.delete(conversationId); // 暂停期间保留队列，删除回滚可恢复唤醒。
+      else if (!this.wakeSuspensions.has(conversationId)) this.pending.delete(conversationId); // 暂停期间保留队列，删除回滚可恢复唤醒。
     } catch (error) {
       this.deps.onError(error);
       this.kick(conversationId, 1_000);
@@ -169,7 +174,7 @@ export class ShellCompletionDispatcher {
     for (const timer of this.timers.values()) clearTimeout(timer);
     this.timers.clear();
     this.wakeBlocked.clear();
-    this.deletionSuspended.clear();
+    this.wakeSuspensions.clear();
     // 停止唤醒后仍须保存未启动定时器的队列，并等待在途写入遍历完其余条目。
     const results = await Promise.allSettled([
       ...[...this.pending.keys()].map(async id => { await this.save(id); await this.retireMismatched(id); }), ...this.operations,

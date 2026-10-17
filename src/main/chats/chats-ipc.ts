@@ -155,8 +155,8 @@ export async function registerChatsIpc(
     llmClient?: LlmClient;
     isPrimaryModelBusy?: () => boolean;
     transcriptCompactor?: ConversationTranscriptCompactor;
-    beforeWorkspaceBindingChange?: (sessionId: string) => Promise<void>;
-    beforeSessionDelete?: (sessionId: string) => Promise<void | (() => void)>;
+    beforeWorkspaceBindingChange?: (sessionId: string) => Promise<void | ((committed?: boolean) => void)>;
+    beforeSessionDelete?: (sessionId: string) => Promise<void | ((committed?: boolean) => void)>;
   } = {},
 ): Promise<void> {
   const ipc = ipcOption ?? createIpcScope();
@@ -381,7 +381,7 @@ export async function registerChatsIpc(
   ipc.handle(IPC.CHATS_DELETE, async (event, id: string) => {
     if (!id) return false;
     const sessionRecord = (await chatsStore.getSessionRecord(id));
-    const rollbackBackground = await options.beforeSessionDelete?.(id);
+    const finishBackground = await options.beforeSessionDelete?.(id);
     let deleted = false;
     try {
     await cancelSummaryMemorySession(id);
@@ -465,7 +465,7 @@ export async function registerChatsIpc(
     }
     return ok;
     } finally {
-      if (!deleted) rollbackBackground?.();
+      finishBackground?.(deleted);
     }
   });
 
@@ -709,6 +709,8 @@ export async function registerChatsIpc(
         return { ok: false, error: `${existing.mode ?? "unknown"} mode does not support workspace binding` };
       }
       // 路径验证：目录存在 + realpath 解析
+      let finishBackground: void | ((committed?: boolean) => void) = undefined;
+      let committed = false;
       try {
         const resolved = validateAndNormalizeWorkspace(payload.workspaceRoot);
         const binding: ConversationWorkspaceBinding = {
@@ -716,9 +718,10 @@ export async function registerChatsIpc(
           displayName: path.basename(resolved),
           boundAt: Date.now(),
         };
-        await options.beforeWorkspaceBindingChange?.(payload.sessionId);
+        finishBackground = await options.beforeWorkspaceBindingChange?.(payload.sessionId);
         const session = (await chatsStore.setWorkspaceBinding(payload.sessionId, binding));
         if (!session) return { ok: false, error: "session not found" };
+        committed = true;
         // 绑定成功即记入最近项目列表，供工作文件夹下拉复选
         recordRecentProject(resolved);
         console.log("[Workspace] 绑定成功:",
@@ -741,6 +744,8 @@ export async function registerChatsIpc(
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         return { ok: false, error: msg };
+      } finally {
+        finishBackground?.(committed);
       }
     },
   );
@@ -774,9 +779,12 @@ export async function registerChatsIpc(
     IPC.CHATS_CLEAR_WORKSPACE,
     async (event, sessionId: string) => {
       if (!sessionId) return { ok: false, error: "missing sessionId" };
-      await options.beforeWorkspaceBindingChange?.(sessionId);
+      const finishBackground = await options.beforeWorkspaceBindingChange?.(sessionId);
+      let committed = false;
+      try {
       const session = (await chatsStore.clearWorkspaceBinding(sessionId));
       if (!session) return { ok: false, error: "session not found" };
+      committed = true;
       // 广播工作区变更
       for (const win of BrowserWindow.getAllWindows()) {
         if (win.isDestroyed()) continue;
@@ -788,6 +796,9 @@ export async function registerChatsIpc(
         } catch { /* ignore */ }
       }
       return { ok: true };
+      } finally {
+        finishBackground?.(committed);
+      }
     },
   );
 

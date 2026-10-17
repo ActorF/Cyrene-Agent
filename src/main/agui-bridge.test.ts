@@ -1633,7 +1633,7 @@ describe("agui-bridge background shell smoke (mock sessions, isolated SQLite)", 
   it("a rolled-back deletion resumes queued and future automatic completions", async () => {
     const original = await start();
     await expect.poll(() => bridge.__getSessionActiveRunForTest("original")).toBeUndefined();
-    const rollback = await bridge.prepareBackgroundSessionDelete("original");
+    const rollback = await bridge.prepareBackgroundSessionMutation("original");
     original.onShellJobComplete!(snapshot("during-delete"));
     await new Promise(resolve => setTimeout(resolve, 40));
     expect(mocks.runCyreneAgent).toHaveBeenCalledTimes(1);
@@ -1768,6 +1768,80 @@ describe("agui-bridge background shell smoke (mock sessions, isolated SQLite)", 
     original.onShellJobComplete!(snapshot("late-old-workspace"));
     await new Promise(resolve => setTimeout(resolve, 50));
     expect(mocks.runCyreneAgent).toHaveBeenCalledTimes(count);
+  });
+
+  it("keeps retired prepared events out of live polling after mutation rollback", async () => {
+    let builds = 0;
+    let preparing = false;
+    bridge.registerAgUiIpc(async input => {
+      if (input.modelContext && ++builds === 1) {
+        preparing = true;
+        await new Promise<void>(resolve => input.signal!.addEventListener("abort", () => resolve(), { once: true }));
+        throw new Error("PREFLIGHT_CANCELLED");
+      }
+      return { options: { settings: { provider: "test", baseUrl: "", model: "fake", apiKey: "" },
+        messages: input.modelContext?.messages ?? [], toolSystemContent: "TOOL", soulSystemBaseContent: "SOUL" }, latestUserText: "fixture" };
+    }, async () => {}, () => null);
+    const original = await start();
+    await expect.poll(() => bridge.__getSessionActiveRunForTest("original")).toBeUndefined();
+    original.onShellJobComplete!(snapshot("retired-prepared"));
+    await expect.poll(() => preparing).toBe(true);
+    const finish = await bridge.prepareBackgroundSessionMutation("original");
+    finish(false);
+    await new Promise(resolve => setTimeout(resolve, 1200));
+    expect(builds).toBe(1);
+    expect(mocks.runCyreneAgent).toHaveBeenCalledTimes(1);
+    expect(await original.pollShellCompletions!()).toEqual([]);
+    original.onShellJobComplete!(snapshot("fresh-after-rollback"));
+    await expect.poll(() => mocks.runCyreneAgent.mock.calls.length).toBe(2);
+    const resumed = mocks.runCyreneAgent.mock.calls[1][0] as typeof original;
+    expect(JSON.stringify(resumed.messages)).toContain("fresh-after-rollback");
+    expect(JSON.stringify(resumed.messages)).not.toContain("retired-prepared");
+    expect(await resumed.pollShellCompletions!()).toEqual([]);
+  });
+
+  it("retries failed retirement after the cancelled run guard is released", async () => {
+    const original = await start();
+    await expect.poll(() => bridge.__getSessionActiveRunForTest("original")).toBeUndefined();
+    mocks.skipDefaultRunFinished = true; mocks.neverComplete = true; mocks.completeOnAbort = true;
+    original.onShellJobComplete!(snapshot("retry-retirement"));
+    await expect.poll(() => mocks.runCyreneAgent.mock.calls.length).toBe(2);
+    const { getConversationTranscriptStore } = await import("./orchestrator/conversation-transcript-store");
+    const { ConversationJournalService } = await import("./orchestrator/conversation-journal-service");
+    const store = getConversationTranscriptStore(mocks.userDataRoot);
+    const append = store.append.bind(store);
+    let fail = true;
+    const spy = vi.spyOn(store, "append").mockImplementation(async (...args) => {
+      if (args[1].kind === "background_event_retired" && fail) { fail = false; throw new Error("RETIRE_FAILED"); }
+      return append(...args);
+    });
+    try {
+      await expect(bridge.cancelBackgroundConversationRun("original")).rejects.toThrow("RETIRE_FAILED");
+      expect(bridge.__getSessionActiveRunForTest("original")).toBeUndefined();
+      await bridge.cancelBackgroundConversationRun("original");
+      const context = await new ConversationJournalService({ store }).buildModelContext("original");
+      expect(JSON.stringify(context.messages)).not.toContain("retry-retirement");
+      expect((await store.readAuditEntries("original")).filter(entry => entry.kind === "background_event_retired")).toHaveLength(1);
+    } finally { spy.mockRestore(); }
+  });
+
+  it.each(["keep_user", "replace_user"] as const)("retires a late completion from a branch removed by %s", async disposition => {
+    const original = await start();
+    await expect.poll(() => bridge.__getSessionActiveRunForTest("original")).toBeUndefined();
+    const { getConversationTranscriptStore } = await import("./orchestrator/conversation-transcript-store");
+    const { ConversationJournalService } = await import("./orchestrator/conversation-journal-service");
+    const store = getConversationTranscriptStore(mocks.userDataRoot);
+    await store.append("original", { kind: "user", id: "source-user", turnId: "source-user", revision: 1, at: 1, payload: { text: "old task" } });
+    await store.append("original", { kind: "assistant", id: "source-assistant", runId: original.runId, at: 2, payload: { role: "assistant", content: "launched shell" } });
+    await store.append("original", { kind: "turn_rewind", id: "replace-old", at: 3,
+      ...(disposition === "replace_user" ? { turnId: "source-user", revision: 2 } : {}),
+      payload: { anchorUserTurnId: "source-user", disposition, reason: disposition === "keep_user" ? "regenerate" : "edit", replacementUser: { text: "new task" } } });
+    original.onShellJobComplete!(snapshot("superseded-job"));
+    await expect.poll(async () => (await store.readAuditEntries("original")).some(entry => entry.kind === "background_event_retired")).toBe(true);
+    expect(mocks.runCyreneAgent).toHaveBeenCalledTimes(1);
+    expect(await original.pollShellCompletions!()).toEqual([]);
+    const context = await new ConversationJournalService({ store }).buildModelContext("original");
+    expect(JSON.stringify(context.messages)).not.toContain("superseded-job");
   });
 
   it("a workspace mutation does not cancel foreground work or another conversation", async () => {
@@ -1962,7 +2036,7 @@ describe("agui-bridge background shell smoke (mock sessions, isolated SQLite)", 
     let stopping: Promise<unknown> | undefined;
     try {
       stopping = action === "shutdown" ? bridge.disposeShellCompletionDispatch()
-        : action === "delete" ? bridge.prepareBackgroundSessionDelete("original") : bridge.cancelBackgroundConversationRun("original");
+        : action === "delete" ? bridge.prepareBackgroundSessionMutation("original") : bridge.cancelBackgroundConversationRun("original");
       expect(preparationSignal?.aborted).toBe(true);
       await stopping;
       expect(bridge.__getSessionActiveRunForTest("original")).toBeUndefined();

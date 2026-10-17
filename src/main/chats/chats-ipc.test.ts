@@ -651,7 +651,8 @@ describe("chats IPC mode filtering", () => {
       const deleting = mocks.handlers.get(IPC.CHATS_DELETE)!(event, session.id);
       if (outcome === "throw") await expect(deleting).rejects.toThrow("DELETE_FAILED");
       else expect(await deleting).toBe(outcome === "success");
-      expect(rollback).toHaveBeenCalledTimes(outcome === "success" ? 0 : 1);
+      expect(rollback).toHaveBeenCalledTimes(1);
+      expect(rollback).toHaveBeenCalledWith(outcome === "success");
     } finally { deletion.mockRestore(); }
   });
 
@@ -709,6 +710,33 @@ describe("chats IPC mode filtering", () => {
     expect(await changed).toEqual(expect.objectContaining({ ok: true }));
     if (action === "clear") expect(await store.getWorkspaceBinding(session.id)).toBeUndefined();
     else expect((await store.getWorkspaceBinding(session.id))?.workspaceRoot).toBe(fs.realpathSync(b));
+  });
+
+  it.each(["set", "clear"])("releases workspace suspension on every %s outcome", async action => {
+    const { registerChatsIpc } = await import("./chats-ipc");
+    const store = await import("./chats-store");
+    const finish = vi.fn();
+    await registerChatsIpc(undefined, { beforeWorkspaceBindingChange: async () => finish });
+    const event = { sender: {} };
+    const session = await mocks.handlers.get(IPC.CHATS_CREATE)!(event, { mode: "code" }) as { id: string };
+    const directory = path.join(mocks.userDataDir, "workspace"); fs.mkdirSync(directory);
+    const method = action === "set" ? "setWorkspaceBinding" : "clearWorkspaceBinding";
+    const mutation = vi.spyOn(store, method);
+    const invoke = () => action === "set"
+      ? mocks.handlers.get(IPC.CHATS_SET_WORKSPACE)!(event, { sessionId: session.id, workspaceRoot: directory })
+      : mocks.handlers.get(IPC.CHATS_CLEAR_WORKSPACE)!(event, session.id);
+    try {
+      mutation.mockRejectedValueOnce(new Error("BINDING_FAILED"));
+      if (action === "clear") await expect(invoke()).rejects.toThrow("BINDING_FAILED");
+      else expect(await invoke()).toMatchObject({ ok: false });
+      expect(finish).toHaveBeenLastCalledWith(false);
+      mutation.mockResolvedValueOnce(null);
+      expect(await invoke()).toMatchObject({ ok: false });
+      expect(finish).toHaveBeenCalledTimes(2);
+      expect(finish).toHaveBeenLastCalledWith(false);
+      expect(await invoke()).toMatchObject({ ok: true });
+      expect(finish).toHaveBeenLastCalledWith(true);
+    } finally { mutation.mockRestore(); }
   });
 
   it("CHATS_SET_WORKSPACE：最近项目记录的目录已不存在时绑定被拒绝且不落库", async () => {

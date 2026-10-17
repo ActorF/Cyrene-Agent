@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildFullModelContext,
+  isTranscriptRunSuperseded,
   buildCompactionSourceView,
   buildModelContextFromCompactedView,
   reduceTranscriptProjection,
@@ -81,6 +82,21 @@ function compactedFixture(): TranscriptEntry[] {
 }
 
 describe("conversation transcript projection", () => {
+  it("tracks source runs across later rewinds and retains archived active sources", () => {
+    nextSeq = 0;
+    const entries = [user("old", "original task"), assistant("old-answer", "shell started", undefined, "source-run"),
+      user("later", "later task"), assistant("later-answer", "later answer", undefined, "later-run")];
+    const rewind: TranscriptEntry = { seq: ++nextSeq, id: "rewind-later", at: nextSeq, kind: "turn_rewind",
+      payload: { anchorUserTurnId: "later", disposition: "keep_user", reason: "regenerate" } };
+    entries.push(rewind);
+    expect(isTranscriptRunSuperseded(entries, "source-run")).toBe(false);
+    expect(isTranscriptRunSuperseded(entries, "later-run")).toBe(true);
+    entries.push({ seq: ++nextSeq, id: "archive-source", at: nextSeq, kind: "compaction_checkpoint",
+      payload: { baseThroughSeq: rewind.seq, sourceThroughSeq: 2, sourceDigest: "fixture", replacement: { role: "system", content: "original task summary" }, trigger: "automatic" } });
+    expect(isTranscriptRunSuperseded(entries, "source-run")).toBe(false);
+    entries.push({ seq: ++nextSeq, id: "remove-original", at: nextSeq, kind: "turn_tombstone", payload: { targetUserTurnId: "old", reason: "pending_withdrawn" } });
+    expect(isTranscriptRunSuperseded(entries, "source-run")).toBe(true);
+  });
   it("materializes background events for the model without inventing user UI messages, including incremental projection and rewind", () => {
     const first = user("background-user", "run a command");
     const seq = ++nextSeq;
