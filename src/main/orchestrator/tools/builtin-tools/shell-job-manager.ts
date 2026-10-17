@@ -173,7 +173,7 @@ function settleJob(
   void persistTerminal(job);
   // 日志关闭后输出才完整；结束通知与阻塞等待者独立。
   void job.logClosed.then(() => {
-    if (!stopping && job.reason !== "app_exiting") job.onComplete?.(snapshotJob(job, job.child?.pid ?? null));
+    if (!stopping && job.status !== "stopped" && job.reason !== "app_exiting") job.onComplete?.(snapshotJob(job));
   }).catch(error => logger.warn(LogTag.BuiltinTools, `[shell_job] 完成通知失败 ${job.jobId}: ${String(error)}`));
   for (const wake of job.terminalWaiters) wake();
   job.terminalWaiters.clear();

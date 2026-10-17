@@ -16,6 +16,19 @@ function setup(busy = false) {
 afterEach(async () => { for (const dispatcher of dispatchers.splice(0)) await dispatcher.dispose(); vi.useRealTimers(); });
 
 describe("shell completion inbox", () => {
+  it("acknowledges only the prepared context and retains events arriving during preparation", async () => {
+    const { dispatcher, deps } = setup(true);
+    const saved: import("./vendors/types").ChatMessage[] = [];
+    deps.append.mockImplementation(async (...args: unknown[]) => { saved.push(args[1] as typeof saved[number]); });
+    dispatcher.enqueue(completion());
+    await expect.poll(() => saved.length).toBe(1);
+    const included = new Set([saved[0].internal!.id]);
+    dispatcher.enqueue(completion("original", "job-2"));
+    await expect.poll(() => saved.length).toBe(2);
+    dispatcher.acknowledge("original", included);
+    expect(await dispatcher.take("original")).toEqual([saved[1]]);
+    expect(dispatcher.canWake("original")).toBe(false);
+  });
   it("persists once and wakes the originating idle conversation without a waiter", async () => {
     const { dispatcher, deps } = setup();
     deps.wake.mockImplementation(async id => { await dispatcher.take(id); });

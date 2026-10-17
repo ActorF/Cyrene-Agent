@@ -98,6 +98,16 @@ export class ShellCompletionDispatcher {
     return messages;
   }
 
+  /** 续跑准备成功后，仅确认本次上下文包含的事件，保留准备期间的新事件。 */
+  acknowledge(conversationId: string, messageIds: ReadonlySet<string>): void {
+    const queue = this.pending.get(conversationId);
+    if (!queue) return;
+    for (const [id, item] of queue) {
+      if (item.saved && messageIds.has(item.message.internal!.id)) queue.delete(id);
+    }
+    if (!queue.size) this.pending.delete(conversationId);
+  }
+
   private async flush(conversationId: string): Promise<void> {
     if (this.stopped || this.flushing.has(conversationId)) return;
     this.flushing.add(conversationId);

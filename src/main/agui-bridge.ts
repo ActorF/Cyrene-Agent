@@ -8,6 +8,7 @@
 // Agent 的 Observable 是内存流、跨不过进程边界。
 // 因此主进程统一持有运行并仅把事件发送给 Renderer。
 import { app, IpcMainInvokeEvent, WebContents } from "electron";
+import { randomUUID } from "node:crypto";
 import { getConversationDatabase } from "./storage/conversation-database-client";
 import type { DispatchReceipt } from "./storage/conversation-run-repository";
 import { getHarnessRunStore } from "./orchestrator/harness/run-store";
@@ -346,9 +347,10 @@ export function registerAgUiIpc(
   }
 
   const onFinished = onRunFinished;
-  void disposeShellCompletionDispatch();
+  const previousDispatchDisposed = disposeShellCompletionDispatch();
   const inbox = new ShellCompletionDispatcher({
     append: async (completion, message) => {
+      await previousDispatchDisposed;
       if (!await chatsStore.getSession(completion.conversationId)) {
         inbox.discard(completion.conversationId);
         return;
@@ -362,12 +364,14 @@ export function registerAgUiIpc(
     isBusy: sessionId => sessionActiveRuns.has(sessionId),
     wake: async (sessionId, eventId) => {
       if (!await chatsStore.getSession(sessionId)) { inbox.discard(sessionId); return; }
-      await dispatchRun({}, { sessionId, assistantTurnId: `shell-reply:${eventId}` }, true);
+      // 每次重试独立接纳，避免失败回执阻止尚未消费的事件再次启动。
+      await dispatchRun({}, { sessionId, assistantTurnId: `shell-reply:${eventId}:${randomUUID()}` }, true);
     },
     onError: error => console.warn("[AgUiBridge] 后台任务通知失败:", error),
   });
   shellCompletions = inbox;
   const dispatchRun = async (event: { sender?: WebContents }, rawInput: unknown, background = false) => {
+    await previousDispatchDisposed;
     if (!buildOptionsFn || !onFinished) {
       throw new Error("AG-UI 桥未初始化");
     }
@@ -534,7 +538,6 @@ export function registerAgUiIpc(
     // renderer 的 messages（即使恶意/旧版载荷仍携带）永远不参与模型上下文。
     let modelContext: MaterializedTranscript | undefined;
     if (background) {
-      await inbox.take(sessionId);
       modelContext = await journal.buildModelContext(sessionId);
     }
     if (currentUser) {
@@ -710,7 +713,7 @@ export function registerAgUiIpc(
     if (mode !== "chat") options.pollRunAdjustments = createRunAdjustmentPoller(
       sessionId, runId, chatsStore, undefined, () => broadcastChatsChanged(),
     );
-    options.requestUserClarification = (card) => requestUserClarification(card, (cardData) => {
+    options.requestUserClarification = background ? undefined : (card) => requestUserClarification(card, (cardData) => {
       send({ type: "CUSTOM", name: "cyrene.choice", value: cardData, threadId, runId });
     }, (settlement) => {
       send({ type: "CUSTOM", name: "cyrene.choice.dismiss", value: settlement, threadId, runId });
@@ -1115,6 +1118,7 @@ export function registerAgUiIpc(
         perf.dump();
       },
     });
+    if (background) inbox.acknowledge(sessionId, seenShellEvents);
     // 同步 Observable 在 subscribe() 返回前可能已 complete 并 delete(runId)。
     // 若此时再无条件 set，会把已结算的 run 重新加入 map，留下幽灵 active run。
     // 仅在未结算（async、仍在运行）时才登记，供 cancel 取消用。

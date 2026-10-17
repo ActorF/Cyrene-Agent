@@ -73,4 +73,15 @@ describe("harness run preparation", () => {
 
     expect(runStore.get).not.toHaveBeenCalled();
   });
+
+  it.each([false, true])("filters quiz announcements only for headless runs (interactive=%s)", async interactive => {
+    const prepared = await prepareHarnessRun({
+      runId: "quiz-filter", conversationId: "thread-1", conversationMode: "learn",
+      settings: { provider: "test", baseUrl: "", model: "model", apiKey: "" },
+      messages: [], toolSystemContent: "", soulSystemBaseContent: "persona",
+      harnessInteractiveTools: interactive,
+      capabilities: { tools: [{ id: "pop_quiz" }, { id: "read_file" }] },
+    } as never, new AbortController().signal);
+    expect(prepared.tools.map(tool => tool.id)).toEqual(interactive ? ["pop_quiz", "read_file"] : ["read_file"]);
+  });
 });

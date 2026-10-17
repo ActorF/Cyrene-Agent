@@ -55,18 +55,31 @@ describe("shell job SQLite lifecycle (isolated data, mocked processes)", () => {
     await expect.poll(() => onShellJobComplete.mock.calls.length).toBe(1);
     expect(onShellJobComplete.mock.calls[0][0]).toMatchObject({ jobId: output.jobId, exitCode: 0 });
   });
-  it.each(["exited", "failed", "stopped", "output-limit"])("notifies %s exactly once after log close, without a status waiter", async terminal => {
+  it.each(["exited", "failed", "output-limit"])("notifies %s exactly once after log close, without a status waiter", async terminal => {
     const onComplete = vi.fn();
     const { jobId } = await manager.startShellJob({ ...options(), onComplete, logMaxBytes: terminal === "output-limit" ? 4 : undefined });
     child.stdout.emit("data", Buffer.from("done"));
-    if (terminal === "exited") child.emit("close", 7);
+    if (terminal === "exited") {
+      Object.assign(child, { pid: 123456 });
+      child.emit("close", 7);
+    }
     if (terminal === "failed") child.emit("error", new Error("fixture failure"));
-    if (terminal === "stopped") await manager.stopShellJob(jobId);
     await expect.poll(() => onComplete.mock.calls.length).toBe(1);
-    expect(onComplete.mock.calls[0][0]).toMatchObject({ jobId, tail: "done", status: terminal === "output-limit" ? "failed" : terminal });
+    expect(onComplete.mock.calls[0][0]).toMatchObject({ jobId, pid: null, tail: "done", status: terminal === "output-limit" ? "failed" : terminal });
     child.emit("close", 0);
     await manager.stopShellJob(jobId);
     expect(onComplete).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not wake the agent after an explicit stop, while status waiters still settle", async () => {
+    const onComplete = vi.fn();
+    const { jobId } = await manager.startShellJob({ ...options(), onComplete });
+    const waiting = manager.waitForShellJob(jobId, 60_000);
+    expect(await manager.stopShellJob(jobId)).toMatchObject({ status: "stopped" });
+    expect(await waiting).toMatchObject({ status: "stopped" });
+    child.emit("close", 0);
+    await manager.disposeAllShellJobs();
+    expect(onComplete).not.toHaveBeenCalled();
   });
 
   it("notifies timeout and never notifies app shutdown", async () => {

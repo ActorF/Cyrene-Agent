@@ -26,6 +26,11 @@ function currentState(): AgentState {
 }
 
 describe("Harness user-wait builtins", () => {
+  it.each(["NORMAL", "PLAN_DISCUSSING"] as const)("omits plan approval without an interactive frontend in %s", planState => {
+    expect(getHarnessBuiltinToolSpecs({ includeInteractive: false, planState }).map(tool => tool.name))
+      .not.toContain("submit_plan");
+    expect(getHarnessBuiltinToolSpecs({ planState }).map(tool => tool.name)).toContain("submit_plan");
+  });
   it("omits interactive builtins when the channel cannot render Ask", () => {
     expect(getHarnessBuiltinToolSpecs({ includeInteractive: false }).map((tool) => tool.name))
       .toEqual(["update_todo", "task", "read_tool_result"]);

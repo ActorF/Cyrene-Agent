@@ -40,3 +40,9 @@ it("keeps automatically allowed tools available and foreground approval unchange
   cancelPendingApprovalsForRun("foreground");
   await rejected;
 });
+
+it("preserves full permission mode for background tools without requesting approval", async () => {
+  setCurrentLevel("full");
+  expect((await checkPermission({ toolId: "fixture", toolName: "fixture", toolDescription: "fixture", args: {}, risk: "shell", allowPrompt: false })).allowed).toBe(true);
+  expect(state.send).not.toHaveBeenCalled();
+});

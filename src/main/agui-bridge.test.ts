@@ -1615,6 +1615,7 @@ describe("agui-bridge background shell smoke (mock sessions, isolated SQLite)", 
     expect(resumed.transcriptSink).toBeDefined();
     expect(resumed.harnessInteractiveTools).toBe(false);
     expect(resumed.allowPermissionPrompt).toBe(false);
+    expect(resumed.requestUserClarification).toBeUndefined();
     expect(resumed.permissionMode).not.toBe("allow_all");
     expect(resumed.messages).toEqual(expect.arrayContaining([expect.objectContaining({ visibility: "internal", content: expect.stringContaining('"exitCode":7') })]));
     expect(await resumed.pollShellCompletions!()).toEqual([]);
@@ -1640,6 +1641,70 @@ describe("agui-bridge background shell smoke (mock sessions, isolated SQLite)", 
     expect(mocks.runCyreneAgent).toHaveBeenCalledTimes(1);
     expect(await original.pollShellCompletions!()).toEqual([]);
     expect((await getConversationTranscriptStore(mocks.userDataRoot).read("original")).entries[0].kind).toBe("background_event");
+  });
+
+  it.each(["context", "options", "sink"])("retries a transient %s preparation failure without losing or duplicating the event", async stage => {
+    if (stage === "options") {
+      let fail = true;
+      bridge.registerAgUiIpc(async input => {
+        if (input.modelContext && fail) { fail = false; throw new Error("TRANSIENT_OPTIONS"); }
+        return { options: { settings: { provider: "test", baseUrl: "", model: "fake", apiKey: "" },
+          messages: input.modelContext?.messages ?? [], toolSystemContent: "TOOL", soulSystemBaseContent: "SOUL" }, latestUserText: "fixture" };
+      }, async () => {}, () => null);
+    }
+    const original = await start();
+    await expect.poll(() => bridge.__getSessionActiveRunForTest("original")).toBeUndefined();
+    const { ConversationJournalService } = await import("./orchestrator/conversation-journal-service");
+    const method = stage === "context" ? "buildModelContext" : "createRunSink";
+    const failure = vi.spyOn(ConversationJournalService.prototype, method);
+    if (stage !== "options") failure.mockImplementationOnce(() => { throw new Error("TRANSIENT_PREPARATION"); });
+    let replySaved: Promise<string> | undefined;
+    mocks.runCyreneAgent.mockImplementation(options => {
+      replySaved = options.transcriptSink.appendAssistant({ message: { role: "assistant", content: "模拟模型已处理任务结果" } });
+    });
+    try {
+      original.onShellJobComplete!(snapshot());
+      await expect.poll(() => mocks.runCyreneAgent.mock.calls.length, { timeout: 4000 }).toBe(2);
+      const resumed = mocks.runCyreneAgent.mock.calls[1][0] as typeof original;
+      expect(JSON.stringify(resumed.messages)).toContain("job-smoke");
+      await replySaved;
+      const { getConversationTranscriptStore } = await import("./orchestrator/conversation-transcript-store");
+      const entries = (await getConversationTranscriptStore(mocks.userDataRoot).read("original")).entries;
+      expect(entries.filter(entry => entry.kind === "background_event")).toHaveLength(1);
+      expect(entries.filter(entry => entry.kind === "assistant")).toEqual([
+        expect.objectContaining({ runId: resumed.runId, payload: expect.objectContaining({ content: "模拟模型已处理任务结果" }) }),
+      ]);
+      expect(await resumed.pollShellCompletions!()).toEqual([]);
+      await expect.poll(() => bridge.__getSessionActiveRunForTest("original")).toBeUndefined();
+    } finally { failure.mockRestore(); }
+  });
+
+  it("waits for the previous dispatcher write before running a newly registered bridge", async () => {
+    const original = await start();
+    await expect.poll(() => bridge.__getSessionActiveRunForTest("original")).toBeUndefined();
+    const { getConversationTranscriptStore } = await import("./orchestrator/conversation-transcript-store");
+    const store = getConversationTranscriptStore(mocks.userDataRoot);
+    const append = store.append.bind(store);
+    let release!: () => void;
+    const delayed = vi.spyOn(store, "append").mockImplementationOnce(async (...args) => {
+      await new Promise<void>(resolve => { release = resolve; });
+      return append(...args);
+    });
+    original.onShellJobComplete!(snapshot());
+    await expect.poll(() => typeof release).toBe("function");
+    const build = vi.fn(async () => ({ options: {
+      settings: { provider: "test", baseUrl: "", model: "fake", apiKey: "" },
+      messages: [], toolSystemContent: "TOOL", soulSystemBaseContent: "SOUL",
+    }, latestUserText: "fixture" }));
+    bridge.registerAgUiIpc(build, async () => {}, () => null);
+    const next = mocks.handlers.get(IPC.AGUI_RUN)!({ sender: { isDestroyed: () => false, send: vi.fn() } },
+      { sessionId: "original", assistantTurnId: "after-registration" });
+    try {
+      await new Promise(resolve => setTimeout(resolve, 20));
+      expect(build).not.toHaveBeenCalled();
+    } finally { release(); await next; delayed.mockRestore(); }
+    expect(mocks.runCyreneAgent).toHaveBeenCalledTimes(2);
+    await expect.poll(() => bridge.__getSessionActiveRunForTest("original")).toBeUndefined();
   });
 
   it("busy completion is injected once and never starts a concurrent run", async () => {
