@@ -1610,6 +1610,39 @@ describe("agui-bridge background shell smoke (mock sessions, isolated SQLite)", 
     return mocks.runCyreneAgent.mock.calls[0][0] as import("./orchestrator/cyrene-agent").CyreneRunOptions;
   }
 
+  it("defers a Learn completion until another vault run settles", async () => {
+    mocks.getSession.mockImplementation((id: string) => ({ id, mode: "learn", messages: [],
+      workspaceBinding: { workspaceRoot: path.join(mocks.userDataRoot, id), displayName: id, boundAt: 1 } }));
+    const original = await start();
+    await expect.poll(() => bridge.__getSessionActiveRunForTest("original")).toBeUndefined();
+    mocks.skipDefaultRunFinished = true; mocks.neverComplete = true; mocks.completeOnAbort = true;
+    await mocks.handlers.get(IPC.AGUI_RUN)!({}, { sessionId: "other-vault", assistantTurnId: "other" });
+    const other = mocks.runCyreneAgent.mock.calls[1][0];
+    original.onShellJobComplete!(snapshot("learn-wait"));
+    const { getConversationTranscriptStore } = await import("./orchestrator/conversation-transcript-store");
+    const store = getConversationTranscriptStore(mocks.userDataRoot);
+    await expect.poll(async () => (await store.readAuditEntries("original")).some(entry => entry.kind === "background_event_pending")).toBe(true);
+    await new Promise(resolve => setTimeout(resolve, 150));
+    expect(mocks.runCyreneAgent).toHaveBeenCalledTimes(2);
+    expect((await store.readAuditEntries("original")).some(entry => entry.kind === "background_event")).toBe(false);
+    mocks.finishRuns.get(other.runId)!();
+    await expect.poll(() => mocks.runCyreneAgent.mock.calls.length, { timeout: 3000 }).toBe(3);
+    expect(JSON.stringify(mocks.runCyreneAgent.mock.calls[2][0].messages)).toContain("learn-wait");
+  });
+
+  it("rejects a foreground Learn run while another vault continuation is active", async () => {
+    mocks.getSession.mockImplementation((id: string) => ({ id, mode: "learn", messages: [],
+      workspaceBinding: { workspaceRoot: path.join(mocks.userDataRoot, id), displayName: id, boundAt: 1 } }));
+    const original = await start();
+    await expect.poll(() => bridge.__getSessionActiveRunForTest("original")).toBeUndefined();
+    mocks.skipDefaultRunFinished = true; mocks.neverComplete = true; mocks.completeOnAbort = true;
+    original.onShellJobComplete!(snapshot("learn-active"));
+    await expect.poll(() => mocks.runCyreneAgent.mock.calls.length).toBe(2);
+    await expect(mocks.handlers.get(IPC.AGUI_RUN)!({}, { sessionId: "other-vault", assistantTurnId: "other" })).rejects.toThrow("LEARN_RUN_ACTIVE");
+    expect(mocks.runCyreneAgent).toHaveBeenCalledTimes(2);
+    expect(bridge.__getSessionActiveRunForTest("other-vault")).toBeUndefined();
+  });
+
   it("persists busy completions at delivery after the unrelated assistant response", async () => {
     mocks.skipDefaultRunFinished = true; mocks.neverComplete = true; mocks.completeOnAbort = true;
     const original = await start();

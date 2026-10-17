@@ -255,6 +255,7 @@ export function __hasActiveRunForTest(runId: string): boolean {
 // 无论 IPC 时序如何（如 F5 后立即发消息），正确性不依赖渲染端调度顺序。
 
 interface SessionActiveRun {
+  mode: ConversationMode;
   runId: string;
   background: boolean;
   completions: Map<string, ShellCompletionSource>;
@@ -565,11 +566,18 @@ export function registerAgUiIpc(
     for (let takeovers = 0; ; takeovers++) {
       const existing = sessionActiveRuns.get(sessionId);
       if (!existing) {
+        // Learn 的 Vault 和工具注册为全局单例，检查与占用之间不能 await。
+        const activeLearn = mode === "learn" ? [...sessionActiveRuns.values()].find(run => run.mode === "learn") : undefined;
+        if (activeLearn) {
+          endConversation();
+          throw new Error(`LEARN_RUN_ACTIVE:${activeLearn.runId}`);
+        }
         let resolveSettled!: () => void;
         const settled = new Promise<void>((resolve) => { resolveSettled = resolve; });
         // 并发 takeover 中只有一个能走到这里（await 醒来后必须回顶部重新竞争）
         const completions = new Map<string, ShellCompletionSource>();
         sessionActiveRuns.set(sessionId, {
+          mode,
           runId,
           background,
           completions,
@@ -1190,6 +1198,7 @@ export function registerAgUiIpc(
               // 取走本轮抽查的实测作答（take 语义：取后即清，避免重复计入）
               const quizEvidence = takeQuizEvidenceForRun(runId);
               void runLearnPostTurnHook({
+                workspaceRoot: session.workspaceBinding!.workspaceRoot,
                 adapter,
                 cfg: {
                   provider: options.settings.provider,
