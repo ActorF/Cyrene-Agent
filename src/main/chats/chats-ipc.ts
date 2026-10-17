@@ -156,6 +156,7 @@ export async function registerChatsIpc(
     isPrimaryModelBusy?: () => boolean;
     transcriptCompactor?: ConversationTranscriptCompactor;
     beforeWorkspaceBindingChange?: (sessionId: string) => Promise<void>;
+    beforeSessionDelete?: (sessionId: string) => Promise<void>;
   } = {},
 ): Promise<void> {
   const ipc = ipcOption ?? createIpcScope();
@@ -380,6 +381,7 @@ export async function registerChatsIpc(
   ipc.handle(IPC.CHATS_DELETE, async (event, id: string) => {
     if (!id) return false;
     const sessionRecord = (await chatsStore.getSessionRecord(id));
+    await options.beforeSessionDelete?.(id);
     await cancelSummaryMemorySession(id);
     await cancelWikiMemorySession(id);
     const wikiStore = fs.existsSync(path.join(app.getPath("userData"), "memory", "wiki"))

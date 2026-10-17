@@ -116,6 +116,19 @@ describe("conversation transcript projection", () => {
     expect(reduceTranscriptProjection(entries).messages.map(message => message.content).filter(Boolean)).toEqual(["run a command"]);
   });
 
+  it("invalidates a summary of an archived retired completion even without its original row", () => {
+    const entries: TranscriptEntry[] = [
+      { seq: 5, id: "archived-summary", at: 5, kind: "compaction_checkpoint", payload: {
+        baseThroughSeq: 4, sourceThroughSeq: 3, sourceDigest: "digest",
+        replacement: { role: "system", content: "STALE_ARCHIVED_A" }, trigger: "automatic",
+      } },
+      { seq: 6, id: "shell-retired:A", at: 6, kind: "background_event_retired", payload: { jobId: "A", sourceSeq: 2 } },
+      { seq: 7, id: "B", at: 7, turnId: "B", revision: 1, kind: "user", payload: { text: "workspace B" } },
+    ];
+    expect(buildModelContextFromCompactedView(entries, noRuns).messages).toEqual([{ role: "user", content: "workspace B" }]);
+    expect(buildCompactionSourceView(entries, noRuns).messages).toEqual([{ role: "user", content: "workspace B" }]);
+  });
+
   it("墓碑移除目标 user 及其尾部但不删除更早 UI 历史", () => {
     nextSeq = 0;
     const result = reduceTranscriptProjection([

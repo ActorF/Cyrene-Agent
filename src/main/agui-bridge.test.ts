@@ -1687,7 +1687,8 @@ describe("agui-bridge background shell smoke (mock sessions, isolated SQLite)", 
     expect(JSON.stringify(resumed.messages)).not.toContain("job-A");
     const entries = await store.readAuditEntries("original");
     expect(entries.filter(entry => entry.kind === "background_event")).toHaveLength(2);
-    expect(entries).toContainEqual(expect.objectContaining({ kind: "background_event_retired", payload: { jobId: "job-A" } }));
+    expect(entries).toContainEqual(expect.objectContaining({ kind: "background_event_retired", payload: { jobId: "job-A",
+      sourceSeq: entries.find(entry => entry.kind === "background_event" && entry.payload.jobId === "job-A")!.seq } }));
     expect(entries).toContainEqual(expect.objectContaining({ kind: "background_event", payload: expect.objectContaining({
       jobId: "job-A", sourceWorkspace: JSON.stringify([mocks.userDataRoot, 1]),
     }) }));

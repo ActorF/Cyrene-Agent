@@ -705,6 +705,7 @@ export function createDefaultApplicationDependencies(): ApplicationDependencies 
           llmClient: services.llm,
           isPrimaryModelBusy: hasActiveConversationRun,
           beforeWorkspaceBindingChange: cancelBackgroundConversationRun,
+          beforeSessionDelete: cancelBackgroundConversationRun,
           transcriptCompactor,
         });
         await registerMomentsIpc(ipc);

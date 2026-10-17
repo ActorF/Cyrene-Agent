@@ -605,6 +605,48 @@ describe("chats IPC mode filtering", () => {
     expect(mocks.openPath).toHaveBeenCalledWith(fs.realpathSync(workspaceRoot));
   });
 
+  it("settles background cancellation before deleting its conversation", async () => {
+    const { registerChatsIpc } = await import("./chats-ipc");
+    const store = await import("./chats-store");
+    const { getConversationTranscriptStore } = await import("../orchestrator/conversation-transcript-store");
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    let interrupted = false;
+    const beforeSessionDelete = vi.fn(async (id: string) => {
+      await gate;
+      await getConversationTranscriptStore(mocks.userDataDir).append(id, {
+        kind: "interruption", id: "background-cancelled", at: 1_000, runId: "background",
+        payload: { reason: "user_cancel" },
+      });
+      interrupted = true;
+    });
+    await registerChatsIpc(undefined, { beforeSessionDelete });
+    const event = { sender: {} };
+    const session = await mocks.handlers.get(IPC.CHATS_CREATE)!(event, { mode: "code" }) as { id: string };
+    let finished = false;
+    const removing = (mocks.handlers.get(IPC.CHATS_DELETE)!(event, session.id) as Promise<boolean>)
+      .then(result => { finished = true; return result; });
+    try {
+      await expect.poll(() => beforeSessionDelete.mock.calls.length).toBe(1);
+      expect(beforeSessionDelete).toHaveBeenCalledWith(session.id);
+      expect(finished).toBe(false);
+      expect(await store.getSessionRecord(session.id)).not.toBeNull();
+    } finally { release(); await removing; }
+    expect(await removing).toBe(true);
+    expect(interrupted).toBe(true);
+    expect(await store.getSessionRecord(session.id)).toBeNull();
+  });
+
+  it("does not tombstone a conversation when background cancellation fails", async () => {
+    const { registerChatsIpc } = await import("./chats-ipc");
+    const store = await import("./chats-store");
+    await registerChatsIpc(undefined, { beforeSessionDelete: async () => { throw new Error("CANCELLATION_FAILED"); } });
+    const event = { sender: {} };
+    const session = await mocks.handlers.get(IPC.CHATS_CREATE)!(event, { mode: "code" }) as { id: string };
+    await expect(mocks.handlers.get(IPC.CHATS_DELETE)!(event, session.id)).rejects.toThrow("CANCELLATION_FAILED");
+    expect(await store.getSessionRecord(session.id)).not.toBeNull();
+  });
+
   it.each(["rebind", "clear"])("waits for background cancellation before a workspace %s is persisted", async action => {
     const { registerChatsIpc } = await import("./chats-ipc");
     const store = await import("./chats-store");

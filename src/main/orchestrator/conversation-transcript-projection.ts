@@ -565,8 +565,12 @@ function checkpointCoversActiveBranch(
   checkpoint: Extract<TranscriptEntry, { kind: "compaction_checkpoint" }>,
 ): boolean {
   const sourceThroughSeq = checkpoint.payload.sourceThroughSeq;
+  if (entries.some(entry => entry.kind === "background_event_retired"
+    && entry.seq > checkpoint.payload.baseThroughSeq
+    && (entry.payload.sourceSeq === undefined || entry.payload.sourceSeq <= sourceThroughSeq))) return false;
   const beforeCheckpoint = reduceActiveTranscript(
-    entries.filter((entry) => entry.seq <= sourceThroughSeq),
+    entries.filter((entry) => entry.seq <= sourceThroughSeq
+      || (entry.kind === "background_event_retired" && entry.seq <= checkpoint.payload.baseThroughSeq)),
   ).nodes;
   const finalCovered = active.nodes.filter((node) => node.entry.seq <= sourceThroughSeq);
   return beforeCheckpoint.length === finalCovered.length

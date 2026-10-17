@@ -263,7 +263,7 @@ interface SessionActiveRun {
 
 const sessionActiveRuns = new Map<string, SessionActiveRun>();
 
-/** 工作区变更前停止该会话的后台续轮，结算完成前不得写入新绑定。 */
+/** 会话变更或删除前停止后台续轮，结算完成前不得修改会话。 */
 export async function cancelBackgroundConversationRun(sessionId: string): Promise<void> {
   shellCompletions?.suppressWake(sessionId);
   const run = sessionActiveRuns.get(sessionId);
@@ -382,9 +382,11 @@ export function registerAgUiIpc(
         inbox.discard(completion.conversationId);
         return;
       }
+      const source = (await transcriptStore.readAuditEntries(completion.conversationId)).find(entry =>
+        entry.kind === "background_event" && entry.payload.jobId === completion.snapshot.jobId);
       await transcriptStore.append(completion.conversationId, {
         kind: "background_event_retired", id: `shell-retired:${completion.snapshot.jobId}`,
-        at: Date.now(), runId: completion.sourceRunId, payload: { jobId: completion.snapshot.jobId },
+        at: Date.now(), runId: completion.sourceRunId, payload: { jobId: completion.snapshot.jobId, sourceSeq: source?.seq },
       });
     },
     isBusy: sessionId => sessionActiveRuns.has(sessionId),

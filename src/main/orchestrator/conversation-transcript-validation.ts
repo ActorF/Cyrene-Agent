@@ -45,7 +45,8 @@ function isValidTranscriptPayload(entry: Partial<TranscriptEntry>): boolean {
         (entry.payload.sourceWorkspace === undefined || typeof entry.payload.sourceWorkspace === "string") &&
         isValidCanonicalChatMessage(entry.payload.message) && entry.payload.message.visibility === "internal";
     case "background_event_retired":
-      return typeof entry.payload.jobId === "string" && entry.payload.jobId.length > 0;
+      return typeof entry.payload.jobId === "string" && entry.payload.jobId.length > 0 &&
+        (entry.payload.sourceSeq === undefined || (Number.isInteger(entry.payload.sourceSeq) && entry.payload.sourceSeq > 0));
     case "user":
       return typeof entry.turnId === "string" && entry.turnId.length > 0 &&
         Number.isInteger(entry.revision) && (entry.revision ?? 0) >= 1 &&
