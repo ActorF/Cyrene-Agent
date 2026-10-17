@@ -20,6 +20,7 @@ const mocks = vi.hoisted(() => ({
   runCyreneAgent: vi.fn(),
   requestUserClarification: vi.fn(),
   agentEvents: [] as unknown[],
+  finishRuns: new Map<string, () => void>(),
   // 可定制的终态行为
   runFinishedResult: undefined as unknown,
   emitDuplicateRunFinished: false,
@@ -68,6 +69,7 @@ vi.mock("./orchestrator/cyrene-agent", () => ({
       const runId = (options as { runId?: string } | null | undefined)?.runId;
       const signal = (options as { signal?: AbortSignal } | null | undefined)?.signal;
       return new Observable((subscriber) => {
+        mocks.finishRuns.set(runId!, () => { subscriber.next({ type: "RUN_FINISHED", runId }); subscriber.complete(); });
         this.lastResult = { reply: "抱抱你", toolResults: [] };
         subscriber.next({ type: "RUN_STARTED", runId });
         for (const event of mocks.agentEvents) subscriber.next(event);
@@ -1668,6 +1670,44 @@ describe("agui-bridge background shell smoke (mock sessions, isolated SQLite)", 
       jobId: "effective-workspace", sourceWorkspace: JSON.stringify([b.workspaceRoot, b.boundAt]),
     }) }));
     expect(entries.some(entry => entry.kind === "background_event_retired")).toBe(false);
+  });
+
+  it.each(["poll", "settle"])("delivers after registration while the old foreground run is busy: %s", async boundary => {
+    mocks.skipDefaultRunFinished = true; mocks.neverComplete = true; mocks.completeOnAbort = true;
+    const original = await start();
+    bridge.registerAgUiIpc(async input => ({ options: { settings: { provider: "test", baseUrl: "", model: "fake", apiKey: "" },
+      messages: input.modelContext?.messages ?? [], toolSystemContent: "TOOL", soulSystemBaseContent: "SOUL" }, latestUserText: "fixture" }), async () => {}, () => null);
+    original.onShellJobComplete!(snapshot("late-while-busy"));
+    const { getConversationTranscriptStore } = await import("./orchestrator/conversation-transcript-store");
+    const store = getConversationTranscriptStore(mocks.userDataRoot);
+    await expect.poll(async () => (await store.readAuditEntries("original")).some(entry => entry.kind === "background_event_pending")).toBe(true);
+    if (boundary === "poll") {
+      expect(await original.pollShellCompletions!()).toHaveLength(1);
+      expect(await original.pollShellCompletions!()).toEqual([]);
+    }
+    mocks.skipDefaultRunFinished = false; mocks.neverComplete = false;
+    mocks.finishRuns.get(original.runId!)!();
+    if (boundary === "settle") {
+      await expect.poll(() => mocks.runCyreneAgent.mock.calls.length).toBe(2);
+      expect(JSON.stringify(mocks.runCyreneAgent.mock.calls[1][0].messages)).toContain("late-while-busy");
+    }
+    await expect.poll(() => bridge.__getSessionActiveRunForTest("original")).toBeUndefined();
+    expect((await store.readAuditEntries("original")).filter(entry => entry.kind === "background_event")).toHaveLength(1);
+  });
+
+  it("routes late shell callbacks to the current dispatcher after registration", async () => {
+    const original = await start();
+    await expect.poll(() => bridge.__getSessionActiveRunForTest("original")).toBeUndefined();
+    bridge.registerAgUiIpc(async input => ({ options: { settings: { provider: "test", baseUrl: "", model: "fake", apiKey: "" },
+      messages: input.modelContext?.messages ?? [], toolSystemContent: "TOOL", soulSystemBaseContent: "SOUL" }, latestUserText: "fixture" }), async () => {}, () => null);
+    original.onShellJobComplete!(snapshot("late-after-registration"));
+    await expect.poll(() => mocks.runCyreneAgent.mock.calls.length).toBe(2);
+    const resumed = mocks.runCyreneAgent.mock.calls[1][0] as typeof original;
+    expect(JSON.stringify(resumed.messages)).toContain("late-after-registration");
+    const { getConversationTranscriptStore } = await import("./orchestrator/conversation-transcript-store");
+    const audit = await getConversationTranscriptStore(mocks.userDataRoot).readAuditEntries("original");
+    expect(audit.filter(entry => entry.kind === "background_event_pending")).toHaveLength(1);
+    expect(audit.filter(entry => entry.kind === "background_event")).toHaveLength(1);
   });
 
   it.each(["reregister", "restart"])("recovers durable pending results only on explicit run after %s", async scenario => {

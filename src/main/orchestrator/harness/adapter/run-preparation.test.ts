@@ -81,10 +81,10 @@ describe("harness run preparation", () => {
       settings: { provider: "test", baseUrl: "", model: "model", apiKey: "" },
       messages: [], toolSystemContent: "", soulSystemBaseContent: "persona",
       harnessInteractiveTools: interactive,
-      capabilities: { tools: [{ id: "pop_quiz" }, { id: "browser_control_start", browserControlPhase: "entry" },
+      capabilities: { tools: [{ id: "pop_quiz" }, { id: "learn_exam_publish" }, { id: "browser_control_start", browserControlPhase: "entry" },
         { id: "browser_click", browserControlPhase: "active" }, { id: "read_file" }] },
     } as never, new AbortController().signal);
     expect(prepared.tools.map(tool => tool.id)).toEqual(interactive !== false
-      ? ["pop_quiz", "browser_control_start", "browser_click", "read_file"] : ["read_file"]);
+      ? ["pop_quiz", "learn_exam_publish", "browser_control_start", "browser_click", "read_file"] : ["read_file"]);
   });
 });

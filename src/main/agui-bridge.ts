@@ -792,13 +792,14 @@ export function registerAgUiIpc(
     options.signal = runAbortController.signal;
     const completionWorkspace = shellWorkspaceIdentity(options.resolvedWorkspaceBinding === undefined
       ? session.workspaceBinding : options.resolvedWorkspaceBinding ?? undefined);
-    options.onShellJobComplete = snapshot => inbox.enqueue({
+    // 任务可能晚于 IPC 重新注册结束；投递到当前队列，保留启动时的来源身份。
+    options.onShellJobComplete = snapshot => shellCompletions?.enqueue({
       conversationId: sessionId, sourceRunId: runId, snapshot, signal: runAbortController.signal,
       sourceWorkspace: completionWorkspace,
     });
     const seenShellEvents = new Set((modelContext?.messages ?? options.messages)
       .flatMap(message => message.internal ? [message.internal.id] : []));
-    options.pollShellCompletions = async () => (await inbox.take(sessionId)).filter(message => {
+    options.pollShellCompletions = async () => (await shellCompletions?.take(sessionId) ?? []).filter(message => {
       const id = message.internal!.id;
       if (seenShellEvents.has(id)) return false;
       seenShellEvents.add(id);
@@ -909,7 +910,7 @@ export function registerAgUiIpc(
       }
       endConversation();
       backgroundRunControllers.delete(runAbortController);
-      inbox.kick(sessionId);
+      shellCompletions?.kick(sessionId);
     };
 
     // <think> 标签过滤器：按单条 assistant message 隔离（TEXT_MESSAGE_START ~ END）
@@ -1237,7 +1238,7 @@ export function registerAgUiIpc(
       backgroundRunControllers.delete(runAbortController);
       endConversation();
       // 后台失败由派发器统一延迟重试，不能用立即定时器覆盖退避。
-      if (!background) inbox.kick(sessionId);
+      if (!background) shellCompletions?.kick(sessionId);
       throw error;
     }
     } catch (error) {
