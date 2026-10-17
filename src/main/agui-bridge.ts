@@ -781,9 +781,11 @@ export function registerAgUiIpc(
     // 触发 harness 返回 cancelled，CyreneAgent 发出 RUN_FINISHED(result.status="cancelled")，
     // complete 回调自然清理。
     options.signal = runAbortController.signal;
+    const completionWorkspace = shellWorkspaceIdentity(options.resolvedWorkspaceBinding === undefined
+      ? session.workspaceBinding : options.resolvedWorkspaceBinding ?? undefined);
     options.onShellJobComplete = snapshot => inbox.enqueue({
       conversationId: sessionId, sourceRunId: runId, snapshot, signal: runAbortController.signal,
-      sourceWorkspace: runWorkspace,
+      sourceWorkspace: completionWorkspace,
     });
     const seenShellEvents = new Set((modelContext?.messages ?? options.messages)
       .flatMap(message => message.internal ? [message.internal.id] : []));

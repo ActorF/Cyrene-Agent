@@ -1644,6 +1644,32 @@ describe("agui-bridge background shell smoke (mock sessions, isolated SQLite)", 
     await expect.poll(() => mocks.runCyreneAgent.mock.calls.length).toBe(3);
   });
 
+  it.each(["different-root", "same-root-new-generation"])("stamps completions with the workspace used by preparation: %s", async scenario => {
+    const a = { workspaceRoot: mocks.userDataRoot, displayName: "A", boundAt: 1 };
+    const b = { workspaceRoot: scenario === "different-root" ? path.join(mocks.userDataRoot, "B") : mocks.userDataRoot, displayName: "B", boundAt: 2 };
+    let binding = a;
+    mocks.getSession.mockImplementation((id: string) => ({ id, mode: "code", messages: [], workspaceBinding: binding }));
+    bridge.registerAgUiIpc(async input => {
+      // bridge 已读取 A；模拟构建参数前 CHATS_SET_WORKSPACE 提交了 B。
+      binding = b;
+      return { options: { settings: { provider: "test", baseUrl: "", model: "fake", apiKey: "" },
+        messages: input.modelContext?.messages ?? [], resolvedWorkspaceRoot: b.workspaceRoot, resolvedWorkspaceBinding: b,
+        toolSystemContent: "TOOL", soulSystemBaseContent: "SOUL" }, latestUserText: "fixture" };
+    }, async () => {}, () => null);
+    const original = await start();
+    await expect.poll(() => bridge.__getSessionActiveRunForTest("original")).toBeUndefined();
+    original.onShellJobComplete!(snapshot("effective-workspace"));
+    await expect.poll(() => mocks.runCyreneAgent.mock.calls.length).toBe(2);
+    const resumed = mocks.runCyreneAgent.mock.calls[1][0] as typeof original;
+    expect(JSON.stringify(resumed.messages)).toContain("effective-workspace");
+    const { getConversationTranscriptStore } = await import("./orchestrator/conversation-transcript-store");
+    const entries = await getConversationTranscriptStore(mocks.userDataRoot).readAuditEntries("original");
+    expect(entries).toContainEqual(expect.objectContaining({ kind: "background_event", payload: expect.objectContaining({
+      jobId: "effective-workspace", sourceWorkspace: JSON.stringify([b.workspaceRoot, b.boundAt]),
+    }) }));
+    expect(entries.some(entry => entry.kind === "background_event_retired")).toBe(false);
+  });
+
   it("idle completion wakes the original conversation and provides durable result context without a fake user turn", async () => {
     const original = await start();
     await expect.poll(() => bridge.__getSessionActiveRunForTest("original")).toBeUndefined();

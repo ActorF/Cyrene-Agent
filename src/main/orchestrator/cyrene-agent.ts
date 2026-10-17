@@ -195,6 +195,8 @@ export interface CyreneRunOptions {
    * 不能从用户消息、模型输出或 process.cwd() 推导。
    */
   resolvedWorkspaceRoot?: string;
+  /** 构建工具上下文时读取的绑定；null 表示明确未继承工作区。 */
+  resolvedWorkspaceBinding?: { workspaceRoot: string; boundAt: number } | null;
   /**
    * 外部取消信号。
    * - 由 AG-UI bridge 创建的 AbortController 注入，AGUI_CANCEL 调用 abort()。

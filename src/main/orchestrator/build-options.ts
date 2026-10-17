@@ -1145,6 +1145,7 @@ export async function buildAgentRunOptions(
       capabilities,
       ...(availableSkills.length > 0 ? { availableSkills } : {}),
       resolvedWorkspaceRoot,
+      resolvedWorkspaceBinding: workspaceBinding ?? null,
     },
     latestUserText,
   };

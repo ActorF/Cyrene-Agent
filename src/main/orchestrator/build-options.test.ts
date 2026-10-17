@@ -389,6 +389,16 @@ describe("build-options", () => {
     expect(result.options.toolSystemContent).toContain("不得写入桌面")
   })
 
+  it("returns the exact workspace generation used for tool options", async () => {
+    const deps = createBuildDeps()
+    const binding = { workspaceRoot: "C:/projects/effective", displayName: "effective", boundAt: 27 }
+    deps.getWorkspaceBinding = vi.fn(async () => binding)
+    const result = await buildAgentRunOptions({ sessionId: "effective", messages: [{ role: "user", content: "continue" }], executionMode: "work" }, deps)
+    expect(result.options.resolvedWorkspaceRoot).toBe(binding.workspaceRoot)
+    expect(result.options.resolvedWorkspaceBinding).toEqual(binding)
+    expect(deps.getWorkspaceBinding).toHaveBeenCalledTimes(1)
+  })
+
   it("does not load a workspace when the main-process caller disables workspace inheritance", async () => {
     const deps = createBuildDeps()
     deps.getWorkspaceBinding = vi.fn(() => ({
@@ -407,6 +417,7 @@ describe("build-options", () => {
 
     expect(deps.getWorkspaceBinding).not.toHaveBeenCalled()
     expect(result.options.resolvedWorkspaceRoot).toBeUndefined()
+    expect(result.options.resolvedWorkspaceBinding).toBeNull()
     expect(result.options.toolSystemContent).not.toContain("可信根目录")
   })
 
