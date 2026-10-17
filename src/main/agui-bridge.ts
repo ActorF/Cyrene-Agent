@@ -60,6 +60,9 @@ import { ShellCompletionDispatcher } from "./orchestrator/shell-completion-dispa
 
 let shellCompletions: ShellCompletionDispatcher | undefined;
 const backgroundRunControllers = new Map<AbortController, Promise<void>>();
+function shellWorkspaceIdentity(binding?: { workspaceRoot: string; boundAt: number }): string {
+  return JSON.stringify([binding?.workspaceRoot ?? null, binding?.boundAt ?? null]);
+}
 export async function disposeShellCompletionDispatch(): Promise<void> {
   const disposed = shellCompletions?.dispose();
   shellCompletions = undefined;
@@ -363,15 +366,17 @@ export function registerAgUiIpc(
       });
     },
     isBusy: sessionId => sessionActiveRuns.has(sessionId),
-    wake: async (sessionId, eventId) => {
+    canDeliver: async completion => completion.sourceWorkspace === shellWorkspaceIdentity(
+      (await chatsStore.getSession(completion.conversationId))?.workspaceBinding),
+    wake: async (sessionId, eventId, completion) => {
       if (!await chatsStore.getSession(sessionId)) { inbox.discard(sessionId); return; }
       // 每次重试独立接纳，避免失败回执阻止尚未消费的事件再次启动。
-      await dispatchRun({}, { sessionId, assistantTurnId: `shell-reply:${eventId}:${randomUUID()}` }, true);
+      await dispatchRun({}, { sessionId, assistantTurnId: `shell-reply:${eventId}:${randomUUID()}` }, true, completion.sourceWorkspace);
     },
     onError: error => console.warn("[AgUiBridge] 后台任务通知失败:", error),
   });
   shellCompletions = inbox;
-  const dispatchRun = async (event: { sender?: WebContents }, rawInput: unknown, background = false) => {
+  const dispatchRun = async (event: { sender?: WebContents }, rawInput: unknown, background = false, sourceWorkspace?: string) => {
     await previousDispatchDisposed;
     if (!buildOptionsFn || !onFinished) {
       throw new Error("AG-UI 桥未初始化");
@@ -428,6 +433,8 @@ export function registerAgUiIpc(
       throw new Error(`AGUI_RUN 会话不存在: ${sessionId}`);
     }
     const mode = session.mode ?? (session.purpose === "proactive-chat" ? "chat" : "work");
+    const runWorkspace = shellWorkspaceIdentity(session.workspaceBinding);
+    if (background && sourceWorkspace !== runWorkspace) throw new Error("SHELL_COMPLETION_WORKSPACE_CHANGED");
     if ((mode === "work" || mode === "code" || mode === "learn") && !session.workspaceBinding?.workspaceRoot) {
       endConversation();
       // 结束事实已落盘；工作区解绑后等用户显式继续，不能每秒重试唤醒。
@@ -699,6 +706,7 @@ export function registerAgUiIpc(
     options.signal = runAbortController.signal;
     options.onShellJobComplete = snapshot => inbox.enqueue({
       conversationId: sessionId, sourceRunId: runId, snapshot, signal: runAbortController.signal,
+      sourceWorkspace: runWorkspace,
     });
     const seenShellEvents = new Set((modelContext?.messages ?? options.messages)
       .flatMap(message => message.internal ? [message.internal.id] : []));
@@ -861,6 +869,10 @@ export function registerAgUiIpc(
     // TEXT_MESSAGE_CONTENT 经 <think> 过滤后再转发；
     // complete/error 时做副作用，并补发一个终态事件让渲染端知道这轮结束。
     perf.mark("agent_run_start");
+    if (background && sourceWorkspace !== shellWorkspaceIdentity((await chatsStore.getSession(sessionId))?.workspaceBinding)) {
+      throw new Error("SHELL_COMPLETION_WORKSPACE_CHANGED");
+    }
+    if (background && runAbortController.signal.aborted) throw new Error("SHELL_COMPLETION_CANCELLED");
     const sub = agent.runWithEvents(options).subscribe({
       next: (baseEvent) => {
         const eventType = (baseEvent as { type?: string })?.type;

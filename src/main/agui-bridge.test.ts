@@ -1646,6 +1646,41 @@ describe("agui-bridge background shell smoke (mock sessions, isolated SQLite)", 
     expect((await getConversationTranscriptStore(mocks.userDataRoot).read("original")).entries[0].kind).toBe("background_event");
   });
 
+  it.each(["code", "work", "learn"])("keeps a %s completion durable without waking a rebound workspace", async mode => {
+    mocks.getSession.mockImplementation((id: string) => ({ id, mode, messages: [],
+      workspaceBinding: { workspaceRoot: mocks.userDataRoot, displayName: "A", boundAt: 1 } }));
+    const original = await start();
+    await expect.poll(() => bridge.__getSessionActiveRunForTest("original")).toBeUndefined();
+    mocks.getSession.mockImplementation((id: string) => ({ id, mode, messages: [],
+      workspaceBinding: { workspaceRoot: path.join(mocks.userDataRoot, "B"), displayName: "B", boundAt: 2 } }));
+    original.onShellJobComplete!(snapshot());
+    const { getConversationTranscriptStore } = await import("./orchestrator/conversation-transcript-store");
+    await expect.poll(async () => (await getConversationTranscriptStore(mocks.userDataRoot).read("original")).entries.length).toBe(1);
+    await new Promise(resolve => setTimeout(resolve, 100));
+    expect(mocks.runCyreneAgent).toHaveBeenCalledTimes(1);
+    await bridge.disposeShellCompletionDispatch();
+    const entries = (await getConversationTranscriptStore(mocks.userDataRoot).read("original")).entries;
+    expect(entries.filter(entry => entry.kind === "background_event")).toHaveLength(1);
+    expect(JSON.stringify(entries)).toContain("sourceWorkspace");
+    expect(mocks.runCyreneAgent).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects a workspace rebound during background option preparation", async () => {
+    bridge.registerAgUiIpc(async input => {
+      if (input.modelContext) mocks.getSession.mockImplementation((id: string) => ({ id, mode: "code", messages: [],
+        workspaceBinding: { workspaceRoot: path.join(mocks.userDataRoot, "B"), displayName: "B", boundAt: 2 } }));
+      return { options: { settings: { provider: "test", baseUrl: "", model: "fake", apiKey: "" },
+        messages: input.modelContext?.messages ?? [], toolSystemContent: "TOOL", soulSystemBaseContent: "SOUL" }, latestUserText: "fixture" };
+    }, async () => {}, () => null);
+    const original = await start();
+    await expect.poll(() => bridge.__getSessionActiveRunForTest("original")).toBeUndefined();
+    original.onShellJobComplete!(snapshot());
+    await expect.poll(() => mocks.getSession("original").workspaceBinding.boundAt).toBe(2);
+    await bridge.disposeShellCompletionDispatch();
+    expect(mocks.runCyreneAgent).toHaveBeenCalledTimes(1);
+    expect(bridge.__getSessionActiveRunForTest("original")).toBeUndefined();
+  });
+
   it.each(["context", "options", "sink"])("retries a transient %s preparation failure without losing or duplicating the event", async stage => {
     if (stage === "options") {
       let fail = true;
