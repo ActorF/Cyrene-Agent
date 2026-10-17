@@ -646,8 +646,11 @@ export function registerGmailTools(service: GmailService): void {
       properties: { messageId: { type: "string", description: "邮件 ID" }, attachmentId: { type: "string", description: "附件 ID" } },
       required: ["messageId", "attachmentId"],
     },
-    execute: async (args) => {
+    execute: async (args, context) => {
       try {
+        if (context?.allowUserInteraction === false) {
+          throw new ToolExecutionError("USER_CHOICE_UNAVAILABLE", "当前运行不支持附件保存对话框，请在前台会话中重试。", "permission_denied");
+        }
         const file = await service.downloadAttachment(String(args.messageId ?? ""), String(args.attachmentId ?? ""));
         const saved = await dialog.showSaveDialog({ defaultPath: file.filename, title: "保存 Gmail 附件" });
         if (saved.canceled || !saved.filePath) return "[gmail_download_attachment] 已取消保存附件。";

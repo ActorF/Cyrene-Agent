@@ -3,8 +3,13 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   handle: vi.fn(), sendMail: vi.fn(), deleteDraft: vi.fn(),
   card: vi.fn(), dismiss: vi.fn(),
+  downloadAttachment: vi.fn(), showSaveDialog: vi.fn(), writeFile: vi.fn(),
 }));
-vi.mock("electron", () => ({ ipcMain: { handle: mocks.handle }, dialog: {} }));
+vi.mock("electron", () => ({ ipcMain: { handle: mocks.handle }, dialog: { showSaveDialog: mocks.showSaveDialog } }));
+vi.mock("node:fs", async importOriginal => {
+  const actual = await importOriginal<typeof import("node:fs")>();
+  return { ...actual, promises: { ...actual.promises, writeFile: mocks.writeFile } };
+});
 vi.mock("./timeout-manager", () => ({ getTimeoutSettings: () => ({ userChoiceTimeout: 60_000 }) }));
 vi.mock("./toast/toast-events", () => ({ toastEvents: {
   publishChoiceCard: mocks.card, publishChoiceDismiss: mocks.dismiss,
@@ -29,10 +34,34 @@ beforeEach(() => {
   registerGmailTools({
     getDraft: vi.fn(async () => ({ id: "draft-1", message: { subject: "fixture", to: ["to@example.invalid"] } })),
     deleteDraft: mocks.deleteDraft,
+    downloadAttachment: mocks.downloadAttachment,
   } as never);
   mocks.sendMail.mockResolvedValue({ accepted: ["to@example.invalid"], messageId: "fixture" });
+  mocks.downloadAttachment.mockResolvedValue({ filename: "fixture.txt", mimeType: "text/plain", bytes: Buffer.from("fixture") });
+  mocks.showSaveDialog.mockResolvedValue({ canceled: false, filePath: "mock-save-path" });
 });
 afterEach(() => { vi.clearAllTimers(); vi.useRealTimers(); });
+
+it.each(["normal", "allow_all"] as const)("blocks headless attachment downloads before network, dialog and file writes (%s)", async permissionMode => {
+  const result = await executeToolDefinition(toolRegistry.getById("gmail_download_attachment")!,
+    { messageId: "message-1", attachmentId: "attachment-1" },
+    { userQuery: "fixture", allowUserInteraction: false, permissionMode });
+  expect(result).toMatchObject({ status: "failed", errorCode: "USER_CHOICE_UNAVAILABLE", retryable: false, effectState: "not_applied" });
+  expect(mocks.downloadAttachment).not.toHaveBeenCalled();
+  expect(mocks.showSaveDialog).not.toHaveBeenCalled();
+  expect(mocks.writeFile).not.toHaveBeenCalled();
+});
+
+it.each([false, true])("preserves foreground attachment save/cancel behavior (cancelled=%s)", async canceled => {
+  mocks.showSaveDialog.mockResolvedValue({ canceled, filePath: "mock-save-path" });
+  const result = await executeToolDefinition(toolRegistry.getById("gmail_download_attachment")!,
+    { messageId: "message-1", attachmentId: "attachment-1" }, { userQuery: "fixture" });
+  expect(result.status).toBe("succeeded");
+  expect(mocks.downloadAttachment).toHaveBeenCalledWith("message-1", "attachment-1");
+  expect(mocks.showSaveDialog).toHaveBeenCalledWith({ defaultPath: "fixture.txt", title: "保存 Gmail 附件" });
+  if (canceled) expect(mocks.writeFile).not.toHaveBeenCalled();
+  else expect(mocks.writeFile).toHaveBeenCalledWith("mock-save-path", Buffer.from("fixture"), { flag: "w" });
+});
 
 it("rejects headless choices without timers, cards, toasts or accepting a dangerous default", async () => {
   const sender = vi.fn();
