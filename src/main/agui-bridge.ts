@@ -56,7 +56,7 @@ import {
 import { cancelPendingApprovalsForRun } from "./permission";
 import { cancelPendingQuizzesForRun, takeQuizEvidenceForRun } from "./orchestrator/pop-quiz";
 import type { PluginPromptMode, PluginTurnCompletedEvent } from "../plugins/types";
-import { ShellCompletionDispatcher, type ShellCompletion } from "./orchestrator/shell-completion-dispatcher";
+import { ShellCompletionDispatcher, type ShellCompletionSource } from "./orchestrator/shell-completion-dispatcher";
 
 let shellCompletions: ShellCompletionDispatcher | undefined;
 const backgroundRunControllers = new Map<AbortController, Promise<void>>();
@@ -257,7 +257,7 @@ export function __hasActiveRunForTest(runId: string): boolean {
 interface SessionActiveRun {
   runId: string;
   background: boolean;
-  completions: Map<string, ShellCompletion>;
+  completions: Map<string, ShellCompletionSource>;
   retireCompletions: () => Promise<void>;
   /** 触发该 run 的 cancelled 流程（复用 AGUI_CANCEL 同款 abort 链路）。 */
   abort: () => void;
@@ -393,7 +393,7 @@ export function registerAgUiIpc(
 
   const onFinished = onRunFinished;
   const previousDispatchDisposed = disposeShellCompletionDispatch();
-  const retireCompletion = async (completion: ShellCompletion) => {
+  const retireCompletion = async (completion: ShellCompletionSource) => {
     if (!await chatsStore.getSession(completion.conversationId)) {
       inbox.discard(completion.conversationId);
       return;
@@ -406,7 +406,7 @@ export function registerAgUiIpc(
       at: Date.now(), runId: completion.sourceRunId, payload: { jobId: completion.snapshot.jobId, sourceSeq: source?.seq },
     });
   };
-  const canDeliverCompletion = async (completion: ShellCompletion) => {
+  const canDeliverCompletion = async (completion: ShellCompletionSource) => {
     if (completion.sourceWorkspace !== shellWorkspaceIdentity((await chatsStore.getSession(completion.conversationId))?.workspaceBinding)) return false;
     const entries = await transcriptStore.readAuditEntries(completion.conversationId);
     if (entries.some(entry => entry.kind === "background_event_retired" && entry.payload.jobId === completion.snapshot.jobId)) return false;
@@ -446,7 +446,7 @@ export function registerAgUiIpc(
     onError: error => console.warn("[AgUiBridge] 后台任务通知失败:", error),
   });
   shellCompletions = inbox;
-  const dispatchRun = async (event: { sender?: WebContents }, rawInput: unknown, background = false, sourceCompletion?: ShellCompletion) => {
+  const dispatchRun = async (event: { sender?: WebContents }, rawInput: unknown, background = false, sourceCompletion?: ShellCompletionSource) => {
     const sourceWorkspace = sourceCompletion?.sourceWorkspace;
     await previousDispatchDisposed;
     if (!buildOptionsFn || !onFinished) {
@@ -568,7 +568,7 @@ export function registerAgUiIpc(
         let resolveSettled!: () => void;
         const settled = new Promise<void>((resolve) => { resolveSettled = resolve; });
         // 并发 takeover 中只有一个能走到这里（await 醒来后必须回顶部重新竞争）
-        const completions = new Map<string, ShellCompletion>();
+        const completions = new Map<string, ShellCompletionSource>();
         sessionActiveRuns.set(sessionId, {
           runId,
           background,
@@ -619,7 +619,16 @@ export function registerAgUiIpc(
       if (background) {
         if (!inbox.canWake(sessionId)) throw new Error("SHELL_COMPLETION_CANCELLED");
         backgroundRunControllers.set(runAbortController, guard!.settled);
-      } else inbox.resume(sessionId);
+      } else {
+        // 退出/重注册会清空内存队列，下一次主动运行从审计事实恢复尚未投递的结果。
+        const entries = await transcriptStore.readAuditEntries(sessionId);
+        const closed = new Set(entries.flatMap(entry => entry.kind === "background_event" || entry.kind === "background_event_retired"
+          ? [entry.payload.jobId] : []));
+        inbox.restore(sessionId, entries.flatMap(entry => entry.kind === "background_event_pending" && entry.runId && !closed.has(entry.payload.jobId)
+          ? [{ event: { conversationId: sessionId, sourceRunId: entry.runId, sourceWorkspace: entry.payload.sourceWorkspace,
+            snapshot: { jobId: entry.payload.jobId } }, message: entry.payload.message }] : []));
+        inbox.resume(sessionId);
+      }
     // ── 轨迹派发：canonical user/rewind → presentation → model context ──
     // renderer 的 messages（即使恶意/旧版载荷仍携带）永远不参与模型上下文。
     let modelContext: MaterializedTranscript | undefined;

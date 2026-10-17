@@ -2,13 +2,17 @@ import type { ShellJobSnapshot } from "./tools/builtin-tools/shell-job-manager";
 import type { ChatMessage } from "./vendors/types";
 import { createInternalTranscriptMessage } from "./harness/internal-transcript";
 
-export interface ShellCompletion {
+export interface ShellCompletionSource {
   conversationId: string;
   sourceRunId: string;
   sourceWorkspace?: string;
-  snapshot: ShellJobSnapshot;
+  snapshot: Pick<ShellJobSnapshot, "jobId">;
   /** 进程退出后，原运行仍可能被用户取消。 */
   signal?: AbortSignal;
+}
+
+export interface ShellCompletion extends ShellCompletionSource {
+  snapshot: ShellJobSnapshot;
 }
 
 export function shellCompletionMessage(event: ShellCompletion): ChatMessage {
@@ -21,7 +25,7 @@ export function shellCompletionMessage(event: ShellCompletion): ChatMessage {
 
 /** 先持久化结束事实再投递，避免依赖当前选中的窗口。 */
 export class ShellCompletionDispatcher {
-  private pending = new Map<string, Map<string, { event: ShellCompletion; message: ChatMessage; saved: boolean }>>();
+  private pending = new Map<string, Map<string, { event: ShellCompletionSource; message: ChatMessage; saved: boolean }>>();
   private flushing = new Set<string>();
   private saves = new Map<string, Promise<void>>();
   private operations = new Set<Promise<void>>();
@@ -55,12 +59,12 @@ export class ShellCompletionDispatcher {
   }
 
   constructor(private readonly deps: {
-    append(event: ShellCompletion, message: ChatMessage): Promise<void>;
-    deliver?(event: ShellCompletion, message: ChatMessage): Promise<void>;
+    append(event: ShellCompletionSource, message: ChatMessage): Promise<void>;
+    deliver?(event: ShellCompletionSource, message: ChatMessage): Promise<void>;
     isBusy(conversationId: string): boolean;
-    wake(conversationId: string, eventId: string, event: ShellCompletion): Promise<void>;
-    canDeliver?(event: ShellCompletion): Promise<boolean>;
-    retire?(event: ShellCompletion): Promise<void>;
+    wake(conversationId: string, eventId: string, event: ShellCompletionSource): Promise<void>;
+    canDeliver?(event: ShellCompletionSource): Promise<boolean>;
+    retire?(event: ShellCompletionSource): Promise<void>;
     onError(error: unknown): void;
   }) {}
 
@@ -70,6 +74,16 @@ export class ShellCompletionDispatcher {
     if (!queue) this.pending.set(event.conversationId, queue = new Map());
     if (!queue.has(event.snapshot.jobId)) queue.set(event.snapshot.jobId, { event, message: shellCompletionMessage(event), saved: false });
     this.kick(event.conversationId);
+  }
+
+  /** 仅由用户主动运行恢复持久收件；不安排自动唤醒，不覆盖现有取消信号。 */
+  restore(conversationId: string, items: Array<{ event: ShellCompletionSource; message: ChatMessage }>): void {
+    if (this.stopped || !items.length) return;
+    let queue = this.pending.get(conversationId);
+    if (!queue) this.pending.set(conversationId, queue = new Map());
+    for (const item of items) {
+      if (!queue.has(item.event.snapshot.jobId)) queue.set(item.event.snapshot.jobId, { ...item, saved: true });
+    }
   }
 
   kick(conversationId: string, delay = 0): void {

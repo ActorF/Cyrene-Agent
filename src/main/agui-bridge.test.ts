@@ -1670,6 +1670,61 @@ describe("agui-bridge background shell smoke (mock sessions, isolated SQLite)", 
     expect(entries.some(entry => entry.kind === "background_event_retired")).toBe(false);
   });
 
+  it.each(["reregister", "restart"])("recovers durable pending results only on explicit run after %s", async scenario => {
+    mocks.skipDefaultRunFinished = true; mocks.neverComplete = true; mocks.completeOnAbort = true;
+    const original = await start();
+    original.onShellJobComplete!(snapshot("recover-pending"));
+    const { getConversationTranscriptStore } = await import("./orchestrator/conversation-transcript-store");
+    const store = getConversationTranscriptStore(mocks.userDataRoot);
+    await expect.poll(async () => (await store.readAuditEntries("original")).some(entry => entry.kind === "background_event_pending")).toBe(true);
+    mocks.handlers.get(IPC.AGUI_CANCEL)!({}, original.runId);
+    await expect.poll(() => bridge.__getSessionActiveRunForTest("original")).toBeUndefined();
+    await bridge.disposeShellCompletionDispatch();
+    if (scenario === "restart") {
+      await closeConversationDatabases();
+      vi.resetModules();
+      bridge = await import("./agui-bridge");
+    }
+    bridge.registerAgUiIpc(async input => ({ options: { settings: { provider: "test", baseUrl: "", model: "fake", apiKey: "" },
+      messages: input.modelContext?.messages ?? [], toolSystemContent: "TOOL", soulSystemBaseContent: "SOUL" }, latestUserText: "fixture" }), async () => {}, () => null);
+    await new Promise(resolve => setTimeout(resolve, 40));
+    expect(mocks.runCyreneAgent).toHaveBeenCalledTimes(1);
+    await mocks.handlers.get(IPC.AGUI_RUN)!({}, { sessionId: "original", assistantTurnId: "explicit-after-dispose" });
+    const resumed = mocks.runCyreneAgent.mock.calls[1][0] as typeof original;
+    const messages = await resumed.pollShellCompletions!();
+    expect(messages).toHaveLength(1);
+    expect(messages[0].content).toContain("recover-pending");
+    expect(await resumed.pollShellCompletions!()).toEqual([]);
+    const freshStore = (await import("./orchestrator/conversation-transcript-store")).getConversationTranscriptStore(mocks.userDataRoot);
+    expect((await freshStore.readAuditEntries("original")).filter(entry => entry.kind === "background_event")).toHaveLength(1);
+    mocks.handlers.get(IPC.AGUI_CANCEL)!({}, resumed.runId);
+    await expect.poll(() => bridge.__getSessionActiveRunForTest("original")).toBeUndefined();
+    await mocks.handlers.get(IPC.AGUI_RUN)!({}, { sessionId: "original", assistantTurnId: "second-explicit" });
+    const second = mocks.runCyreneAgent.mock.calls[2][0] as typeof original;
+    expect(await second.pollShellCompletions!()).toEqual([]);
+  });
+
+  it.each(["retired", "wrong-workspace", "superseded"])("does not recover an ineligible durable result: %s", async reason => {
+    const { getConversationTranscriptStore } = await import("./orchestrator/conversation-transcript-store");
+    const { shellCompletionMessage } = await import("./orchestrator/shell-completion-dispatcher");
+    const store = getConversationTranscriptStore(mocks.userDataRoot);
+    const sourceWorkspace = JSON.stringify([reason === "wrong-workspace" ? "old-root" : mocks.userDataRoot, 1]);
+    const message = shellCompletionMessage({ conversationId: "original", sourceRunId: "old-run", sourceWorkspace, snapshot: snapshot("ineligible") });
+    await store.append("original", { kind: "user", id: "old-user", turnId: "old-user", revision: 1, at: 1, payload: { text: "old task" } });
+    await store.append("original", { kind: "assistant", id: "old-answer", runId: "old-run", at: 2, payload: { role: "assistant", content: "started" } });
+    await store.append("original", { kind: "background_event_pending", id: "shell-completed:ineligible", runId: "old-run", at: 3,
+      payload: { jobId: "ineligible", sourceWorkspace, message } });
+    if (reason === "retired") await store.append("original", { kind: "background_event_retired", id: "shell-retired:ineligible", at: 4, payload: { jobId: "ineligible", sourceSeq: 3 } });
+    if (reason === "superseded") await store.append("original", { kind: "turn_rewind", id: "rewind-old", at: 4,
+      payload: { anchorUserTurnId: "old-user", disposition: "keep_user", reason: "regenerate" } });
+    mocks.skipDefaultRunFinished = true; mocks.neverComplete = true; mocks.completeOnAbort = true;
+    const run = await start();
+    expect(await run.pollShellCompletions!()).toEqual([]);
+    const audit = await store.readAuditEntries("original");
+    expect(audit.some(entry => entry.kind === "background_event")).toBe(false);
+    expect(audit.some(entry => entry.kind === "background_event_retired")).toBe(true);
+  });
+
   it("idle completion wakes the original conversation and provides durable result context without a fake user turn", async () => {
     const original = await start();
     await expect.poll(() => bridge.__getSessionActiveRunForTest("original")).toBeUndefined();
