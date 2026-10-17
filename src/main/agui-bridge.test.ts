@@ -2140,11 +2140,13 @@ describe("agui-bridge background shell smoke (mock sessions, isolated SQLite)", 
 
   it.each(["rebind", "delete", "shutdown"])("cancels background preflight before waiting for %s settlement", async action => {
     let preparationSignal: AbortSignal | undefined;
-    let release!: () => void;
+    let release: (() => void) | undefined;
+    let entered!: () => void;
+    const preparationEntered = new Promise<void>(resolve => { entered = resolve; });
     bridge.registerAgUiIpc(async input => {
       if (input.modelContext) {
         preparationSignal = input.signal;
-        await new Promise<void>(resolve => { release = resolve; input.signal?.addEventListener("abort", () => resolve(), { once: true }); });
+        await new Promise<void>(resolve => { release = resolve; entered(); input.signal?.addEventListener("abort", () => resolve(), { once: true }); });
         throw new Error("PREFLIGHT_ABORTED");
       }
       return { options: { settings: { provider: "test", baseUrl: "", model: "fake", apiKey: "" },
@@ -2153,17 +2155,18 @@ describe("agui-bridge background shell smoke (mock sessions, isolated SQLite)", 
     const original = await start();
     await expect.poll(() => bridge.__getSessionActiveRunForTest("original")).toBeUndefined();
     original.onShellJobComplete!(snapshot());
-    await expect.poll(() => typeof release).toBe("function");
     let stopping: Promise<unknown> | undefined;
     try {
+      // 等待明确的准备入口，不把 CI 的数据库调度耗时当成取消失败。
+      await preparationEntered;
       stopping = action === "shutdown" ? bridge.disposeShellCompletionDispatch()
         : action === "delete" ? bridge.prepareBackgroundSessionMutation("original") : bridge.cancelBackgroundConversationRun("original");
       expect(preparationSignal?.aborted).toBe(true);
       await stopping;
       expect(bridge.__getSessionActiveRunForTest("original")).toBeUndefined();
       expect(mocks.runCyreneAgent).toHaveBeenCalledTimes(1);
-    } finally { release(); await stopping; }
-  });
+    } finally { release?.(); await stopping; }
+  }, 10_000);
 
   it("backs off persistent background preparation failures instead of immediately admitting retries", async () => {
     let attempts = 0;
