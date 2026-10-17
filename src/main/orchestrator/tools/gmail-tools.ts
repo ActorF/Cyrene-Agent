@@ -191,6 +191,12 @@ function presentDraft(card: Record<string, unknown>): string {
   return json({ kind: "mail_draft_card", card });
 }
 
+function requireDraftCardInteraction(context?: ToolContext): void {
+  if (context?.allowUserInteraction === false) {
+    throw new ToolExecutionError("USER_CHOICE_UNAVAILABLE", "当前运行无法展示邮件草稿卡片，请在前台会话中起草。", "permission_denied");
+  }
+}
+
 function effectForDrafts(args: Record<string, unknown>): ToolEffectKind {
   switch (args.operation) {
     case "list":
@@ -502,9 +508,10 @@ export function registerGmailTools(service: GmailService): void {
       },
       required: ["subject", "bodyMarkdown"],
     },
-    execute: async (args) => {
+    execute: async (args, context) => {
       const draft = draftInput(args);
       try {
+        requireDraftCardInteraction(context);
         const provider = args.provider === "smtp" ? "smtp" : "gmail";
         if (provider === "smtp") {
           return presentDraft(cardFromDraft({ provider, from: getSmtpSenderIdentity() ?? "", draft }));
@@ -561,6 +568,7 @@ export function registerGmailTools(service: GmailService): void {
       const input = draftInput(args);
       try {
         if (args.action !== "draft" && args.action !== "send") return "[错误] Gmail 回复操作无效。";
+        if (args.action === "draft") requireDraftCardInteraction(context);
         if (args.action === "send") {
           const authorizationError = requireSendAuthorization(context);
           if (authorizationError) return authorizationError;
@@ -612,6 +620,7 @@ export function registerGmailTools(service: GmailService): void {
       const input = draftInput(args);
       try {
         if (args.action !== "draft" && args.action !== "send") return "[错误] Gmail 转发操作无效。";
+        if (args.action === "draft") requireDraftCardInteraction(context);
         if (args.action === "send") {
           if (!input.to.length) return "[错误] 转发收件人不能为空。";
           const authorizationError = requireSendAuthorization(context);

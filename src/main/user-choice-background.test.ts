@@ -4,6 +4,8 @@ const mocks = vi.hoisted(() => ({
   handle: vi.fn(), sendMail: vi.fn(), deleteDraft: vi.fn(),
   card: vi.fn(), dismiss: vi.fn(),
   downloadAttachment: vi.fn(), showSaveDialog: vi.fn(), writeFile: vi.fn(),
+  getProfile: vi.fn(), createDraft: vi.fn(), createReplyDraft: vi.fn(), createForwardDraft: vi.fn(),
+  getMessage: vi.fn(), sendMessage: vi.fn(), sendDraft: vi.fn(),
 }));
 vi.mock("electron", () => ({ ipcMain: { handle: mocks.handle }, dialog: { showSaveDialog: mocks.showSaveDialog } }));
 vi.mock("node:fs", async importOriginal => {
@@ -35,12 +37,57 @@ beforeEach(() => {
     getDraft: vi.fn(async () => ({ id: "draft-1", message: { subject: "fixture", to: ["to@example.invalid"] } })),
     deleteDraft: mocks.deleteDraft,
     downloadAttachment: mocks.downloadAttachment,
+    getProfile: mocks.getProfile, createDraft: mocks.createDraft,
+    createReplyDraft: mocks.createReplyDraft, createForwardDraft: mocks.createForwardDraft,
+    getMessage: mocks.getMessage, sendMessage: mocks.sendMessage, sendDraft: mocks.sendDraft,
   } as never);
   mocks.sendMail.mockResolvedValue({ accepted: ["to@example.invalid"], messageId: "fixture" });
   mocks.downloadAttachment.mockResolvedValue({ filename: "fixture.txt", mimeType: "text/plain", bytes: Buffer.from("fixture") });
   mocks.showSaveDialog.mockResolvedValue({ canceled: false, filePath: "mock-save-path" });
+  const message = { subject: "fixture", to: ["to@example.invalid"], from: ["from@example.invalid"], textBody: "fixture", attachments: [] };
+  mocks.getProfile.mockResolvedValue({ emailAddress: "sender@example.invalid" });
+  for (const create of [mocks.createDraft, mocks.createReplyDraft, mocks.createForwardDraft]) {
+    create.mockResolvedValue({ id: "draft-1", message });
+  }
+  mocks.getMessage.mockResolvedValue(message);
+  mocks.sendMessage.mockResolvedValue({ messageId: "sent-1" });
+  mocks.sendDraft.mockResolvedValue({ messageId: "sent-1" });
 });
 afterEach(() => { vi.clearAllTimers(); vi.useRealTimers(); });
+
+const cardCases = [
+  { id: "email_create_draft", args: { provider: "smtp" } },
+  { id: "email_create_draft", args: { provider: "gmail" } },
+  { id: "email_create_draft", args: {} },
+  { id: "gmail_reply", args: { messageId: "message-1", action: "draft" } },
+  { id: "gmail_forward", args: { messageId: "message-1", action: "draft" } },
+];
+
+it.each(cardCases)("rejects headless draft cards before remote creation: $id $args", async ({ id, args }) => {
+  const result = await executeToolDefinition(toolRegistry.getById(id)!,
+    { ...args, subject: "fixture", bodyMarkdown: "fixture" },
+    { userQuery: "fixture", allowUserInteraction: false, permissionMode: "allow_all" });
+  expect(result).toMatchObject({ status: "failed", errorCode: "USER_CHOICE_UNAVAILABLE", effectState: "not_applied", retryable: false });
+  for (const call of [mocks.getProfile, mocks.createDraft, mocks.createReplyDraft, mocks.createForwardDraft, mocks.sendMessage, mocks.sendDraft]) {
+    expect(call).not.toHaveBeenCalled();
+  }
+  expect(result.output).not.toContain('"kind":"mail_draft_card"');
+});
+
+it.each(cardCases)("preserves foreground draft cards: $id $args", async ({ id, args }) => {
+  const result = await executeToolDefinition(toolRegistry.getById(id)!,
+    { ...args, subject: "fixture", bodyMarkdown: "fixture" }, { userQuery: "fixture" });
+  expect(result.status).toBe("succeeded");
+  expect(JSON.parse(result.output)).toMatchObject({ kind: "mail_draft_card", card: { status: "draft", bodyMarkdown: "fixture" } });
+});
+
+it.each(["gmail_reply", "gmail_forward"])("keeps explicitly authorized non-card send available: %s", async id => {
+  const result = await executeToolDefinition(toolRegistry.getById(id)!,
+    { messageId: "message-1", action: "send", to: ["to@example.invalid"], bodyMarkdown: "fixture" },
+    { userQuery: "请发送", allowUserInteraction: false, permissionMode: "allow_all" });
+  expect(result.status).toBe("succeeded");
+  expect(JSON.parse(result.output)).toMatchObject({ success: true, messageId: "sent-1" });
+});
 
 it.each(["normal", "allow_all"] as const)("blocks headless attachment downloads before network, dialog and file writes (%s)", async permissionMode => {
   const result = await executeToolDefinition(toolRegistry.getById("gmail_download_attachment")!,
