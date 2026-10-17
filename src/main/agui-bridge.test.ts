@@ -30,6 +30,7 @@ const mocks = vi.hoisted(() => ({
   // 会话守卫/takeover 测试：abort 触发 RUN_FINISHED(cancelled) + complete，
   // 模拟真实 harness 的 cancelled 结算链路（AGUI_CANCEL / takeover 都走这条链）
   completeOnAbort: false,
+  beforeAbortSettlement: null as (() => Promise<void>) | null,
   // 轨迹派发测试：主进程 app.getPath("userData") 的可替换根目录
   userDataRoot: "",
 }));
@@ -86,7 +87,8 @@ vi.mock("./orchestrator/cyrene-agent", () => ({
         }
         // 会话守卫/takeover 测试：abort 触发 cancelled 结算链路
         if (mocks.completeOnAbort && signal) {
-          signal.addEventListener("abort", () => {
+          signal.addEventListener("abort", async () => {
+            await mocks.beforeAbortSettlement?.();
             subscriber.next({
               type: "RUN_FINISHED",
               runId,
@@ -1592,6 +1594,7 @@ describe("agui-bridge background shell smoke (mock sessions, isolated SQLite)", 
   });
   afterEach(async () => {
     await bridge.disposeShellCompletionDispatch();
+    mocks.beforeAbortSettlement = null;
     mocks.skipDefaultRunFinished = false;
     mocks.neverComplete = false;
     mocks.completeOnAbort = false;
@@ -1779,6 +1782,68 @@ describe("agui-bridge background shell smoke (mock sessions, isolated SQLite)", 
     await stopping;
     expect(mocks.runCyreneAgent).toHaveBeenCalledTimes(1);
     expect(bridge.__getSessionActiveRunForTest("original")).toBeUndefined();
+  });
+
+  it("backs off persistent background preparation failures instead of immediately admitting retries", async () => {
+    let attempts = 0;
+    bridge.registerAgUiIpc(async input => {
+      if (input.modelContext) { attempts++; throw new Error("INVALID_MODEL_URL"); }
+      return { options: { settings: { provider: "test", baseUrl: "", model: "fake", apiKey: "" },
+        messages: [], toolSystemContent: "TOOL", soulSystemBaseContent: "SOUL" }, latestUserText: "fixture" };
+    }, async () => {}, () => null);
+    const original = await start();
+    await expect.poll(() => bridge.__getSessionActiveRunForTest("original")).toBeUndefined();
+    original.onShellJobComplete!(snapshot());
+    await expect.poll(() => attempts).toBe(1);
+    await new Promise(resolve => setTimeout(resolve, 200));
+    expect(attempts).toBe(1);
+    await expect.poll(() => attempts, { timeout: 2500 }).toBe(2);
+    await bridge.disposeShellCompletionDispatch();
+    expect(mocks.runCyreneAgent).toHaveBeenCalledTimes(1);
+    const { getConversationDatabase } = await import("./storage/conversation-database-client");
+    const runs = await getConversationDatabase(mocks.userDataRoot).call<Array<{ status: string }>>("runs.all");
+    expect(runs.filter(run => run.status === "failed")).toHaveLength(2);
+  });
+
+  it.each(["abort", "cleanup"])("shutdown waits for background %s settlement before persistence can close", async phase => {
+    const original = await start();
+    await expect.poll(() => bridge.__getSessionActiveRunForTest("original")).toBeUndefined();
+    mocks.skipDefaultRunFinished = true; mocks.neverComplete = true; mocks.completeOnAbort = true;
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    let cleanupStarted = false;
+    mocks.resetPendingAdjustByRun.mockImplementation(async () => {
+      cleanupStarted = true;
+      if (phase === "cleanup") await gate;
+      return { ok: true, reset: 0 };
+    });
+    original.onShellJobComplete!(snapshot());
+    await expect.poll(() => mocks.runCyreneAgent.mock.calls.length).toBe(2);
+    const resumed = mocks.runCyreneAgent.mock.calls[1][0] as typeof original;
+    mocks.beforeAbortSettlement = async () => {
+      if (phase === "abort") await gate;
+      await resumed.transcriptSink!.closeInterruption({ reason: "user_cancel", runSession: null });
+    };
+    if (phase === "cleanup") {
+      mocks.handlers.get(IPC.AGUI_CANCEL)!({}, resumed.runId);
+      await expect.poll(() => cleanupStarted).toBe(true);
+    }
+    let disposed = false;
+    const stopping = bridge.disposeShellCompletionDispatch().then(() => { disposed = true; });
+    try {
+      await new Promise(resolve => setTimeout(resolve, 30));
+      expect(disposed).toBe(false);
+      expect(bridge.__getSessionActiveRunForTest("original")).toBeDefined();
+    } finally { release(); await stopping; }
+    expect(bridge.__getSessionActiveRunForTest("original")).toBeUndefined();
+    await closeConversationDatabases();
+    const { getConversationDatabase } = await import("./storage/conversation-database-client");
+    const runs = await getConversationDatabase(mocks.userDataRoot).call<Array<{ runId: string; status: string }>>("runs.all");
+    expect(runs).toContainEqual(expect.objectContaining({ runId: resumed.runId, status: "cancelled" }));
+    const { getConversationTranscriptStore } = await import("./orchestrator/conversation-transcript-store");
+    expect((await getConversationTranscriptStore(mocks.userDataRoot).read("original")).entries)
+      .toContainEqual(expect.objectContaining({ kind: "interruption", runId: resumed.runId }));
+    expect(cleanupStarted).toBe(true);
   });
 });
 

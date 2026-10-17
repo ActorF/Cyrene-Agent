@@ -59,13 +59,14 @@ import type { PluginPromptMode, PluginTurnCompletedEvent } from "../plugins/type
 import { ShellCompletionDispatcher } from "./orchestrator/shell-completion-dispatcher";
 
 let shellCompletions: ShellCompletionDispatcher | undefined;
-const backgroundRunControllers = new Set<AbortController>();
+const backgroundRunControllers = new Map<AbortController, Promise<void>>();
 export async function disposeShellCompletionDispatch(): Promise<void> {
   const disposed = shellCompletions?.dispose();
   shellCompletions = undefined;
-  for (const controller of backgroundRunControllers) controller.abort();
-  backgroundRunControllers.clear();
-  await disposed;
+  // abort 只发出取消信号；会话守卫的 settled 才代表轨迹、回执和清理已完成。
+  const settlements = [...backgroundRunControllers.values()];
+  for (const controller of backgroundRunControllers.keys()) controller.abort();
+  await Promise.all([disposed, ...settlements]);
 }
 /**
  * 从 RUN_FINISHED 事件中提取规范的终态结果（terminal）。
@@ -532,7 +533,7 @@ export function registerAgUiIpc(
       admitted = true;
       if (background) {
         if (!inbox.canWake(sessionId)) throw new Error("SHELL_COMPLETION_CANCELLED");
-        backgroundRunControllers.add(runAbortController);
+        backgroundRunControllers.set(runAbortController, guard!.settled);
       } else inbox.resume(sessionId);
     // ── 轨迹派发：canonical user/rewind → presentation → model context ──
     // renderer 的 messages（即使恶意/旧版载荷仍携带）永远不参与模型上下文。
@@ -783,7 +784,6 @@ export function registerAgUiIpc(
     // 审批卡不再设超时，任何终态路径（success/cancelled/timeout/error）都必须走到这里，
     // 否则 pending promise 会永久悬挂；取消时会广播 PERMISSION_APPROVAL_SETTLED 让渲染端清卡。
     const cleanupRunState = (): void => {
-      backgroundRunControllers.delete(runAbortController);
       activeRuns.delete(runId);
       cancelPendingChoicesForRun(runId);
       cancelPendingApprovalsForRun(runId);
@@ -812,6 +812,7 @@ export function registerAgUiIpc(
         try { unregisterObsidianTools(); } catch { /* ignore */ }
       }
       endConversation();
+      backgroundRunControllers.delete(runAbortController);
       inbox.kick(sessionId);
     };
 
@@ -1131,11 +1132,12 @@ export function registerAgUiIpc(
     // 这样避免 invoke reply 与 send 事件的投递顺序竞争导致 offEvent 提前取消监听。
     return { success: true, runId };
     } catch (error) {
-      backgroundRunControllers.delete(runAbortController);
       if (admitted) await database.call("runs.terminal", runId, "failed", Date.now(), (error as Error).message).catch(failure => console.error("[AgUiBridge] 失败回执写入失败:", failure));
       releaseSessionGuard?.();
+      backgroundRunControllers.delete(runAbortController);
       endConversation();
-      inbox.kick(sessionId);
+      // 后台失败由派发器统一延迟重试，不能用立即定时器覆盖退避。
+      if (!background) inbox.kick(sessionId);
       throw error;
     }
     } catch (error) {
