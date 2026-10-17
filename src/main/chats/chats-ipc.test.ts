@@ -605,6 +605,35 @@ describe("chats IPC mode filtering", () => {
     expect(mocks.openPath).toHaveBeenCalledWith(fs.realpathSync(workspaceRoot));
   });
 
+  it.each(["rebind", "clear"])("waits for background cancellation before a workspace %s is persisted", async action => {
+    const { registerChatsIpc } = await import("./chats-ipc");
+    const store = await import("./chats-store");
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const beforeWorkspaceBindingChange = vi.fn(async () => { await gate; });
+    await registerChatsIpc(undefined, { beforeWorkspaceBindingChange });
+    const event = { sender: {} };
+    const session = await mocks.handlers.get(IPC.CHATS_CREATE)!(event, { mode: "code" }) as { id: string };
+    const a = path.join(mocks.userDataDir, "A");
+    const b = path.join(mocks.userDataDir, "B");
+    fs.mkdirSync(a); fs.mkdirSync(b);
+    await store.setWorkspaceBinding(session.id, { workspaceRoot: a, displayName: "A", boundAt: 1 });
+    let finished = false;
+    const mutation = (action === "rebind"
+      ? mocks.handlers.get(IPC.CHATS_SET_WORKSPACE)!(event, { sessionId: session.id, workspaceRoot: b })
+      : mocks.handlers.get(IPC.CHATS_CLEAR_WORKSPACE)!(event, session.id)) as Promise<unknown>;
+    const changed = mutation.then(result => { finished = true; return result; });
+    try {
+      await expect.poll(() => beforeWorkspaceBindingChange.mock.calls.length).toBe(1);
+      expect(beforeWorkspaceBindingChange).toHaveBeenCalledWith(session.id);
+      expect(finished).toBe(false);
+      expect((await store.getWorkspaceBinding(session.id))?.workspaceRoot).toBe(a);
+    } finally { release(); await changed; }
+    expect(await changed).toEqual(expect.objectContaining({ ok: true }));
+    if (action === "clear") expect(await store.getWorkspaceBinding(session.id)).toBeUndefined();
+    else expect((await store.getWorkspaceBinding(session.id))?.workspaceRoot).toBe(fs.realpathSync(b));
+  });
+
   it("CHATS_SET_WORKSPACE：最近项目记录的目录已不存在时绑定被拒绝且不落库", async () => {
     const { registerChatsIpc } = await import("./chats-ipc");
     (await registerChatsIpc());

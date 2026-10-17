@@ -69,7 +69,9 @@ export async function disposeShellCompletionDispatch(): Promise<void> {
   // abort 只发出取消信号；会话守卫的 settled 才代表轨迹、回执和清理已完成。
   const settlements = [...backgroundRunControllers.values()];
   for (const controller of backgroundRunControllers.keys()) controller.abort();
-  await Promise.all([disposed, ...settlements]);
+  const results = await Promise.allSettled([disposed, ...settlements]);
+  const failure = results.find(result => result.status === "rejected");
+  if (failure?.status === "rejected") throw failure.reason;
 }
 /**
  * 从 RUN_FINISHED 事件中提取规范的终态结果（terminal）。
@@ -252,6 +254,7 @@ export function __hasActiveRunForTest(runId: string): boolean {
 
 interface SessionActiveRun {
   runId: string;
+  background: boolean;
   /** 触发该 run 的 cancelled 流程（复用 AGUI_CANCEL 同款 abort 链路）。 */
   abort: () => void;
   /** run 终态结算完成（endLifecycle 释放守卫时 resolve）；takeover 等它保证旧 run checkpoint 已落盘。 */
@@ -259,6 +262,15 @@ interface SessionActiveRun {
 }
 
 const sessionActiveRuns = new Map<string, SessionActiveRun>();
+
+/** 工作区变更前停止该会话的后台续轮，结算完成前不得写入新绑定。 */
+export async function cancelBackgroundConversationRun(sessionId: string): Promise<void> {
+  shellCompletions?.suppressWake(sessionId);
+  const run = sessionActiveRuns.get(sessionId);
+  if (!run?.background) return;
+  run.abort();
+  await run.settled;
+}
 
 /** 单次 takeover 等待旧 run 结算的时间上限：结算链路自身故障时超时回顶部重检，而非无限挂起。 */
 let takeoverSettleTimeoutMs = 5_000;
@@ -508,6 +520,7 @@ export function registerAgUiIpc(
         // 并发 takeover 中只有一个能走到这里（await 醒来后必须回顶部重新竞争）
         sessionActiveRuns.set(sessionId, {
           runId,
+          background,
           abort: () => runAbortController.abort(),
           settled,
         });

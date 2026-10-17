@@ -1693,6 +1693,62 @@ describe("agui-bridge background shell smoke (mock sessions, isolated SQLite)", 
     }) }));
   });
 
+  it.each(["code", "work", "learn"])("aborts and settles an in-flight %s continuation before a workspace mutation", async mode => {
+    mocks.getSession.mockImplementation((id: string) => ({ id, mode, messages: [],
+      workspaceBinding: { workspaceRoot: mocks.userDataRoot, displayName: "A", boundAt: 1 } }));
+    const original = await start();
+    await expect.poll(() => bridge.__getSessionActiveRunForTest("original")).toBeUndefined();
+    mocks.skipDefaultRunFinished = true; mocks.neverComplete = true; mocks.completeOnAbort = true;
+    original.onShellJobComplete!(snapshot());
+    await expect.poll(() => mocks.runCyreneAgent.mock.calls.length).toBe(2);
+    const resumed = mocks.runCyreneAgent.mock.calls[1][0] as typeof original;
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    mocks.beforeAbortSettlement = async () => {
+      await gate;
+      await resumed.transcriptSink!.closeInterruption({ reason: "user_cancel", runSession: null });
+    };
+    let settled = false;
+    let changing: Promise<void> | undefined;
+    try {
+      changing = bridge.cancelBackgroundConversationRun("original").then(() => { settled = true; });
+      expect(resumed.signal!.aborted).toBe(true);
+      await new Promise(resolve => setTimeout(resolve, 30));
+      expect(settled).toBe(false);
+      expect(bridge.__getSessionActiveRunForTest("original")).toBe(resumed.runId);
+    } finally { release(); await changing; }
+    expect(bridge.__getSessionActiveRunForTest("original")).toBeUndefined();
+    const { getConversationDatabase } = await import("./storage/conversation-database-client");
+    const runs = await getConversationDatabase(mocks.userDataRoot).call<Array<{ runId: string; status: string }>>("runs.all");
+    expect(runs).toContainEqual(expect.objectContaining({ runId: resumed.runId, status: "cancelled" }));
+    const { getConversationTranscriptStore } = await import("./orchestrator/conversation-transcript-store");
+    expect((await getConversationTranscriptStore(mocks.userDataRoot).read("original")).entries)
+      .toContainEqual(expect.objectContaining({ kind: "interruption", runId: resumed.runId }));
+    const count = mocks.runCyreneAgent.mock.calls.length;
+    original.onShellJobComplete!(snapshot("late-old-workspace"));
+    await new Promise(resolve => setTimeout(resolve, 50));
+    expect(mocks.runCyreneAgent).toHaveBeenCalledTimes(count);
+  });
+
+  it("a workspace mutation does not cancel foreground work or another conversation", async () => {
+    const original = await start();
+    await expect.poll(() => bridge.__getSessionActiveRunForTest("original")).toBeUndefined();
+    mocks.skipDefaultRunFinished = true; mocks.neverComplete = true; mocks.completeOnAbort = true;
+    original.onShellJobComplete!(snapshot());
+    await expect.poll(() => mocks.runCyreneAgent.mock.calls.length).toBe(2);
+    const background = mocks.runCyreneAgent.mock.calls[1][0] as typeof original;
+    await mocks.handlers.get(IPC.AGUI_RUN)!({}, { sessionId: "other", assistantTurnId: "foreground-other" });
+    const foreground = mocks.runCyreneAgent.mock.calls[2][0] as typeof original;
+    try {
+      await bridge.cancelBackgroundConversationRun("other");
+      expect(background.signal!.aborted).toBe(false);
+      expect(foreground.signal!.aborted).toBe(false);
+    } finally {
+      mocks.handlers.get(IPC.AGUI_CANCEL)!({}, foreground.runId);
+      await expect.poll(() => bridge.__getSessionActiveRunForTest("other")).toBeUndefined();
+    }
+  });
+
   it("rejects a workspace rebound during background option preparation", async () => {
     bridge.registerAgUiIpc(async input => {
       if (input.modelContext) mocks.getSession.mockImplementation((id: string) => ({ id, mode: "code", messages: [],
@@ -1866,6 +1922,61 @@ describe("agui-bridge background shell smoke (mock sessions, isolated SQLite)", 
     const { getConversationDatabase } = await import("./storage/conversation-database-client");
     const runs = await getConversationDatabase(mocks.userDataRoot).call<Array<{ status: string }>>("runs.all");
     expect(runs.filter(run => run.status === "failed")).toHaveLength(2);
+  });
+
+  it.each(["abort", "cleanup"])("shutdown waits for %s settlement even when dispatcher disposal fails", async phase => {
+    const original = await start();
+    await expect.poll(() => bridge.__getSessionActiveRunForTest("original")).toBeUndefined();
+    mocks.skipDefaultRunFinished = true; mocks.neverComplete = true; mocks.completeOnAbort = true;
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    let cleanupStarted = false;
+    mocks.resetPendingAdjustByRun.mockImplementation(async () => {
+      cleanupStarted = true;
+      if (phase === "cleanup") await gate;
+      return { ok: true, reset: 0 };
+    });
+    original.onShellJobComplete!(snapshot());
+    await expect.poll(() => mocks.runCyreneAgent.mock.calls.length).toBe(2);
+    const resumed = mocks.runCyreneAgent.mock.calls[1][0] as typeof original;
+    mocks.beforeAbortSettlement = async () => {
+      if (phase === "abort") await gate;
+      await resumed.transcriptSink!.closeInterruption({ reason: "user_cancel", runSession: null });
+    };
+    if (phase === "cleanup") {
+      mocks.handlers.get(IPC.AGUI_CANCEL)!({}, resumed.runId);
+      await expect.poll(() => cleanupStarted).toBe(true);
+    }
+    const { ShellCompletionDispatcher } = await import("./orchestrator/shell-completion-dispatcher");
+    const dispose = ShellCompletionDispatcher.prototype.dispose;
+    const failure = new Error("FINAL_TRANSCRIPT_APPEND_FAILED");
+    const spy = vi.spyOn(ShellCompletionDispatcher.prototype, "dispose").mockImplementationOnce(async function () {
+      await dispose.call(this);
+      throw failure;
+    });
+    let finished = false;
+    const stopping = bridge.disposeShellCompletionDispatch().then(
+      () => { finished = true; return undefined; },
+      error => { finished = true; return error; },
+    );
+    try {
+      await new Promise(resolve => setTimeout(resolve, 30));
+      expect(finished).toBe(false);
+      expect(bridge.__getSessionActiveRunForTest("original")).toBeDefined();
+    } finally {
+      release();
+      await stopping;
+      await expect.poll(() => bridge.__getSessionActiveRunForTest("original")).toBeUndefined();
+      spy.mockRestore();
+    }
+    expect(await stopping).toBe(failure);
+    await closeConversationDatabases();
+    const { getConversationDatabase } = await import("./storage/conversation-database-client");
+    const runs = await getConversationDatabase(mocks.userDataRoot).call<Array<{ runId: string; status: string }>>("runs.all");
+    expect(runs).toContainEqual(expect.objectContaining({ runId: resumed.runId, status: "cancelled" }));
+    const { getConversationTranscriptStore } = await import("./orchestrator/conversation-transcript-store");
+    expect((await getConversationTranscriptStore(mocks.userDataRoot).read("original")).entries)
+      .toContainEqual(expect.objectContaining({ kind: "interruption", runId: resumed.runId }));
   });
 
   it.each(["abort", "cleanup"])("shutdown waits for background %s settlement before persistence can close", async phase => {

@@ -155,6 +155,7 @@ export async function registerChatsIpc(
     llmClient?: LlmClient;
     isPrimaryModelBusy?: () => boolean;
     transcriptCompactor?: ConversationTranscriptCompactor;
+    beforeWorkspaceBindingChange?: (sessionId: string) => Promise<void>;
   } = {},
 ): Promise<void> {
   const ipc = ipcOption ?? createIpcScope();
@@ -707,6 +708,7 @@ export async function registerChatsIpc(
           displayName: path.basename(resolved),
           boundAt: Date.now(),
         };
+        await options.beforeWorkspaceBindingChange?.(payload.sessionId);
         const session = (await chatsStore.setWorkspaceBinding(payload.sessionId, binding));
         if (!session) return { ok: false, error: "session not found" };
         // 绑定成功即记入最近项目列表，供工作文件夹下拉复选
@@ -764,6 +766,7 @@ export async function registerChatsIpc(
     IPC.CHATS_CLEAR_WORKSPACE,
     async (event, sessionId: string) => {
       if (!sessionId) return { ok: false, error: "missing sessionId" };
+      await options.beforeWorkspaceBindingChange?.(sessionId);
       const session = (await chatsStore.clearWorkspaceBinding(sessionId));
       if (!session) return { ok: false, error: "session not found" };
       // 广播工作区变更
