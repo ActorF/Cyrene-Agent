@@ -81,7 +81,10 @@ export async function prepareHarnessRun(
   };
 
   const tools = [...(options.capabilities?.tools ?? options.tools ?? toolRegistry.getEnabledTools())]
-    .filter(tool => options.harnessInteractiveTools !== false || (tool.id !== "pop_quiz" && tool.id !== "learn_exam_publish" && !tool.browserControlPhase));
+    // 出卷草稿归当前 run 所有；后台无法发布，也不能留给后续前台 run 接管。
+    .filter(tool => options.harnessInteractiveTools !== false || (tool.id !== "pop_quiz"
+      && tool.id !== "learn_exam_create_plan" && !tool.id.startsWith("learn_exam_add_")
+      && tool.id !== "learn_exam_publish" && !tool.browserControlPhase));
   const runStore = getHarnessRunStore(app.getPath("userData"));
   // 消息历史与待办/未决副作用均来自会话轨迹投影；这里只为旧入口保留兼容文本提示。
   const baseRunMessages = options.messages;

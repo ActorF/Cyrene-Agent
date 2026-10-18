@@ -76,15 +76,19 @@ describe("harness run preparation", () => {
   });
 
   it.each([false, true, undefined])("filters interactive tools only for headless runs (interactive=%s)", async interactive => {
+    const draftTools = ["learn_exam_create_plan", "learn_exam_add_single_choice", "learn_exam_add_multiple_choice",
+      "learn_exam_add_true_false", "learn_exam_add_fill_blank", "learn_exam_add_written", "learn_exam_publish"];
+    const availableTools = [{ id: "pop_quiz" }, ...draftTools.map(id => ({ id })),
+      { id: "browser_control_start", browserControlPhase: "entry" }, { id: "browser_click", browserControlPhase: "active" },
+      { id: "read_file" }, { id: "learn_exam_get_submission" }, { id: "learn_exam_save_grading" }];
     const prepared = await prepareHarnessRun({
       runId: "quiz-filter", conversationId: "thread-1", conversationMode: "learn",
       settings: { provider: "test", baseUrl: "", model: "model", apiKey: "" },
       messages: [], toolSystemContent: "", soulSystemBaseContent: "persona",
       harnessInteractiveTools: interactive,
-      capabilities: { tools: [{ id: "pop_quiz" }, { id: "learn_exam_publish" }, { id: "browser_control_start", browserControlPhase: "entry" },
-        { id: "browser_click", browserControlPhase: "active" }, { id: "read_file" }] },
+      capabilities: { tools: availableTools },
     } as never, new AbortController().signal);
     expect(prepared.tools.map(tool => tool.id)).toEqual(interactive !== false
-      ? ["pop_quiz", "learn_exam_publish", "browser_control_start", "browser_click", "read_file"] : ["read_file"]);
+      ? availableTools.map(tool => tool.id) : ["read_file", "learn_exam_get_submission", "learn_exam_save_grading"]);
   });
 });
