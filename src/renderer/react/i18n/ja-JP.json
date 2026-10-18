@@ -1369,6 +1369,7 @@
       "dataDir": "データフォルダー",
       "dataDirDescription": "チャット履歴、モデルプロファイル、プラグインなどのデータはここに保存されます",
       "openDataDir": "フォルダーを開く",
+      "openDataDirFailed": "データフォルダーを開けませんでした：{{error}}",
       "save": "設定を保存"
     },
     "usage": {

@@ -62,6 +62,16 @@ describe("通用设置：数据目录", () => {
     expect(api.openDataDir).toHaveBeenCalledTimes(1);
   });
 
+  it("系统无法打开目录时在状态栏提示错误，而不是静默无效", async () => {
+    installSettings({ openDataDir: vi.fn(async () => ({ ok: false, error: "No application is associated" })) });
+    const host = await renderPanel();
+
+    await act(async () => { buttonByText(host, "打开文件夹")!.click(); });
+    await act(async () => { await Promise.resolve(); });
+    expect(host.querySelector("[role='status']")?.textContent).toContain("无法打开数据目录");
+    expect(host.querySelector("[role='status']")?.textContent).toContain("No application is associated");
+  });
+
   it("取不到路径时隐藏整行，其余设置照常显示", async () => {
     installSettings({ getDataDir: vi.fn(async () => { throw new Error("ipc unavailable"); }) });
     const host = await renderPanel();

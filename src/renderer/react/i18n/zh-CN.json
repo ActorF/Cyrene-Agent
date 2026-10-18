@@ -1345,6 +1345,7 @@
       "dataDir": "数据目录",
       "dataDirDescription": "聊天记录、模型档案、插件等数据都保存在这里",
       "openDataDir": "打开文件夹",
+      "openDataDirFailed": "无法打开数据目录：{{error}}",
       "save": "保存设置"
     },
     "usage": {

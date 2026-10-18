@@ -178,8 +178,8 @@ export function registerSettingsIpc(deps: SettingsIpcDependencies): void {
   // 数据目录只读展示 + 打开：打开动作复用聊天存储已有的 openStorageFolder
   ipc.handle(IPC.SETTINGS_GET_DATA_DIR, () => app.getPath("userData"));
   ipc.handle(IPC.SETTINGS_OPEN_DATA_DIR, async () => {
-    await openStorageFolder();
-    return { ok: true };
+    const error = await openStorageFolder();
+    return error ? { ok: false, error } : { ok: true };
   });
 
   ipc.on(IPC.SETTINGS_SET_PET_ALWAYS_ON_TOP, (_event, value: boolean) => {

@@ -109,6 +109,16 @@ export function GeneralSettingsPanel() {
     }
   }
 
+  /** 打开数据目录：系统无法打开时在状态栏提示，避免按钮静默无效 */
+  async function openDataDir() {
+    try {
+      const result = await window.settings?.openDataDir?.();
+      if (result && !result.ok) setStatus(t("settingsPage.general.openDataDirFailed", { error: result.error ?? "" }));
+    } catch {
+      setStatus(t("settingsPage.general.openDataDirFailed", { error: "" }));
+    }
+  }
+
   /** 更新按钮：下载/安装按当前动作执行，检查与重试都从头查一遍 */
   function triggerUpdateAction() {
     const api = window.appUpdate;
@@ -170,7 +180,7 @@ export function GeneralSettingsPanel() {
                   <span className="cy-settings-general__path" data-testid="settings-data-dir">{dataDir}</span>
                 </div>
                 <div className="cy-settings-row__control">
-                  <Button icon={<FolderOpen size={14} />} onClick={() => void window.settings?.openDataDir?.()}>{t("settingsPage.general.openDataDir")}</Button>
+                  <Button icon={<FolderOpen size={14} />} onClick={() => void openDataDir()}>{t("settingsPage.general.openDataDir")}</Button>
                 </div>
               </div>
             )}

@@ -81,7 +81,7 @@ interface SettingsWindowApi {
   openChromeGpu: () => void;
   openCustomStylePrompt: () => Promise<unknown>;
   getDataDir?: () => Promise<string>;
-  openDataDir?: () => Promise<{ ok: boolean }>;
+  openDataDir?: () => Promise<{ ok: boolean; error?: string }>;
   channelsGetStatus: () => Promise<unknown>;
   setPetAlwaysOnTop: (value: boolean) => void;
   setPetVisible: (value: boolean) => void;

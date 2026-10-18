@@ -1345,6 +1345,7 @@
       "dataDir": "Data folder",
       "dataDirDescription": "Chats, model profiles, plugins and other data are stored here",
       "openDataDir": "Open folder",
+      "openDataDirFailed": "Could not open the data folder: {{error}}",
       "save": "Save settings"
     },
     "usage": {
