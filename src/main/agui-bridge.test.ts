@@ -20,6 +20,7 @@ const mocks = vi.hoisted(() => ({
   runCyreneAgent: vi.fn(),
   requestUserClarification: vi.fn(),
   agentEvents: [] as unknown[],
+  failRuns: new Map<string, () => void>(),
   finishRuns: new Map<string, () => void>(),
   // 可定制的终态行为
   runFinishedResult: undefined as unknown,
@@ -69,6 +70,7 @@ vi.mock("./orchestrator/cyrene-agent", () => ({
       const runId = (options as { runId?: string } | null | undefined)?.runId;
       const signal = (options as { signal?: AbortSignal } | null | undefined)?.signal;
       return new Observable((subscriber) => {
+        mocks.failRuns.set(runId!, () => subscriber.error(new Error("MODEL_STREAM_FAILED")));
         mocks.finishRuns.set(runId!, () => { subscriber.next({ type: "RUN_FINISHED", runId }); subscriber.complete(); });
         this.lastResult = { reply: "抱抱你", toolResults: [] };
         subscriber.next({ type: "RUN_STARTED", runId });
@@ -1817,6 +1819,30 @@ describe("agui-bridge background shell smoke (mock sessions, isolated SQLite)", 
     expect(entries.filter(entry => entry.kind === "background_event")).toHaveLength(1);
     expect(entries.filter(entry => entry.kind === "user")).toHaveLength(0);
     await expect.poll(() => bridge.__getSessionActiveRunForTest("original")).toBeUndefined();
+  });
+
+  it.each(["runtime_error", "stream_error"])("retires acknowledged output after %s before rebinding", async failure => {
+    const original = await start();
+    await expect.poll(() => bridge.__getSessionActiveRunForTest("original")).toBeUndefined();
+    mocks.skipDefaultRunFinished = failure === "stream_error";
+    mocks.neverComplete = failure === "stream_error";
+    mocks.runFinishedResult = { status: "runtime_error", reason: "MODEL_FAILED" };
+    original.onShellJobComplete!(snapshot("failed-A"));
+    await expect.poll(() => mocks.runCyreneAgent.mock.calls.length).toBe(2);
+    const resumed = mocks.runCyreneAgent.mock.calls[1][0] as typeof original;
+    if (failure === "stream_error") mocks.failRuns.get(resumed.runId!)!();
+    await expect.poll(() => bridge.__getSessionActiveRunForTest("original")).toBeUndefined();
+    const finish = await bridge.prepareBackgroundSessionMutation("original");
+    mocks.getSession.mockImplementation((id: string) => ({ id, mode: "code", messages: [],
+      workspaceBinding: { workspaceRoot: path.join(mocks.userDataRoot, "B"), displayName: "B", boundAt: 2 } }));
+    finish(true);
+    const { getConversationTranscriptStore } = await import("./orchestrator/conversation-transcript-store");
+    const { ConversationJournalService } = await import("./orchestrator/conversation-journal-service");
+    const store = getConversationTranscriptStore(mocks.userDataRoot);
+    const context = await new ConversationJournalService({ store }).buildModelContext("original");
+    expect(JSON.stringify(context.messages)).not.toContain("failed-A");
+    expect((await store.readAuditEntries("original")).filter(entry => entry.kind === "background_event")).toHaveLength(1);
+    expect((await store.readAuditEntries("original")).filter(entry => entry.kind === "background_event_retired")).toHaveLength(1);
   });
 
   it.each(["code", "work", "learn"])("retires a persisted completion when the %s workspace is cleared", async mode => {

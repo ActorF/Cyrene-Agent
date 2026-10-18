@@ -942,6 +942,22 @@ export function registerAgUiIpc(
       } catch (err) {
         console.warn("[AgUiBridge] 插话标记复位失败:", err);
       }
+      const run = sessionActiveRuns.get(sessionId);
+      if (background && settlementGate.get()?.status !== "success" && run?.runId === runId
+        && !pendingBackgroundRetirements.get(sessionId)?.has(run)) {
+        let pending = pendingBackgroundRetirements.get(sessionId);
+        if (!pending) pendingBackgroundRetirements.set(sessionId, pending = new Set());
+        pending.add(run);
+        // 已确认的事件仍需在失败后退休；写入失败则保留来源供会话变更前重试。
+        // 此处不能等待 run.settled：它由下方释放守卫时完成。
+        try {
+          await run.retireCompletions();
+          pending.delete(run);
+          if (!pending.size) pendingBackgroundRetirements.delete(sessionId);
+        } catch (error) {
+          console.warn("[AgUiBridge] 后台失败事件退休失败:", error);
+        }
+      }
       // 释放会话守卫（compare-and-delete）并 resolve settled：
       // 等待中的 takeover 此刻才被放行，保证其开局时旧 run 的 checkpoint 已落盘。
       releaseSessionGuard?.();
