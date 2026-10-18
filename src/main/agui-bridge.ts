@@ -443,7 +443,7 @@ export function registerAgUiIpc(
     if (completion.sourceWorkspace !== shellWorkspaceIdentity((await chatsStore.getSession(completion.conversationId))?.workspaceBinding)) return false;
     const entries = await transcriptStore.readAuditEntries(completion.conversationId);
     if (entries.some(entry => entry.kind === "background_event_retired" && entry.payload.jobId === completion.snapshot.jobId)) return false;
-    return !isTranscriptRunSuperseded(entries, completion.sourceRunId);
+    return !isTranscriptRunSuperseded(entries, completion.sourceRunId, completion.sourceToolCallId);
   };
   const inbox = new ShellCompletionDispatcher({
     append: async (completion, message) => {
@@ -455,7 +455,7 @@ export function registerAgUiIpc(
       await transcriptStore.append(completion.conversationId, {
         kind: "background_event_pending", id: `shell-completed:${completion.snapshot.jobId}`,
         at: message.internal!.createdAt, runId: completion.sourceRunId,
-        payload: { jobId: completion.snapshot.jobId, sourceWorkspace: completion.sourceWorkspace, message },
+        payload: { jobId: completion.snapshot.jobId, sourceWorkspace: completion.sourceWorkspace, sourceToolCallId: completion.sourceToolCallId, message },
       });
     },
     deliver: async (completion, message) => {
@@ -465,7 +465,7 @@ export function registerAgUiIpc(
       await transcriptStore.append(completion.conversationId, {
         kind: "background_event", id: "shell-delivered:" + completion.snapshot.jobId,
         at: message.internal!.createdAt, runId: completion.sourceRunId,
-        payload: { jobId: completion.snapshot.jobId, sourceWorkspace: completion.sourceWorkspace, message },
+        payload: { jobId: completion.snapshot.jobId, sourceWorkspace: completion.sourceWorkspace, sourceToolCallId: completion.sourceToolCallId, message },
       });
     },
     retire: retireCompletion,
@@ -665,7 +665,7 @@ export function registerAgUiIpc(
         const closed = new Set(entries.flatMap(entry => entry.kind === "background_event" || entry.kind === "background_event_retired"
           ? [entry.payload.jobId] : []));
         inbox.restore(sessionId, entries.flatMap(entry => entry.kind === "background_event_pending" && entry.runId && !closed.has(entry.payload.jobId)
-          ? [{ event: { conversationId: sessionId, sourceRunId: entry.runId, sourceWorkspace: entry.payload.sourceWorkspace,
+          ? [{ event: { conversationId: sessionId, sourceRunId: entry.runId, sourceWorkspace: entry.payload.sourceWorkspace, sourceToolCallId: entry.payload.sourceToolCallId,
             snapshot: { jobId: entry.payload.jobId } }, message: entry.payload.message }] : []));
         inbox.resume(sessionId);
       }
@@ -833,8 +833,8 @@ export function registerAgUiIpc(
     const completionWorkspace = shellWorkspaceIdentity(options.resolvedWorkspaceBinding === undefined
       ? session.workspaceBinding : options.resolvedWorkspaceBinding ?? undefined);
     // 任务可能晚于 IPC 重新注册结束；投递到当前队列，保留启动时的来源身份。
-    options.onShellJobComplete = snapshot => shellCompletions?.enqueue({
-      conversationId: sessionId, sourceRunId: runId, snapshot, signal: runAbortController.signal,
+    options.onShellJobComplete = (snapshot, sourceToolCallId) => shellCompletions?.enqueue({
+      conversationId: sessionId, sourceRunId: runId, sourceToolCallId, snapshot, signal: runAbortController.signal,
       sourceWorkspace: completionWorkspace,
     });
     const seenShellEvents = new Set((modelContext?.messages ?? options.messages)

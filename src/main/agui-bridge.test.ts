@@ -1998,6 +1998,30 @@ describe("agui-bridge background shell smoke (mock sessions, isolated SQLite)", 
     expect(JSON.stringify(context.messages)).not.toContain("superseded-job");
   });
 
+  it.each(["keep_user", "replace_user"] as const)("retires the later Shell segment after a partial same-run rewind by %s", async disposition => {
+    const original = await start();
+    await expect.poll(() => bridge.__getSessionActiveRunForTest("original")).toBeUndefined();
+    const { getConversationTranscriptStore } = await import("./orchestrator/conversation-transcript-store");
+    const { ConversationJournalService } = await import("./orchestrator/conversation-journal-service");
+    const store = getConversationTranscriptStore(mocks.userDataRoot);
+    await store.append("original", { kind: "user", id: "first-user", turnId: "first-user", revision: 1, at: 0, payload: { text: "first segment" } });
+    await store.append("original", { kind: "assistant", id: "first-assistant", runId: original.runId, at: 0, payload: { role: "assistant", content: "surviving segment", toolCalls: [{ id: "first-shell", name: "run_shell", arguments: "{}" }] } });
+    await store.append("original", { kind: "user", id: "source-user", turnId: "source-user", revision: 1, at: 1, payload: { text: "old task" } });
+    await store.append("original", { kind: "assistant", id: "source-assistant", runId: original.runId, at: 2, payload: { role: "assistant", content: "launched shell", toolCalls: [{ id: "later-shell", name: "run_shell", arguments: "{}" }] } });
+    await store.append("original", { kind: "turn_rewind", id: "replace-old", at: 3,
+      ...(disposition === "replace_user" ? { turnId: "source-user", revision: 2 } : {}),
+      payload: { anchorUserTurnId: "source-user", disposition, reason: disposition === "keep_user" ? "regenerate" : "edit", replacementUser: { text: "new task" } } });
+    original.onShellJobComplete!(snapshot("superseded-job"), "later-shell");
+    await expect.poll(async () => (await store.readAuditEntries("original")).some(entry => entry.kind === "background_event_retired")).toBe(true);
+    expect(mocks.runCyreneAgent).toHaveBeenCalledTimes(1);
+    expect(await original.pollShellCompletions!()).toEqual([]);
+    const context = await new ConversationJournalService({ store }).buildModelContext("original");
+    expect(JSON.stringify(context.messages)).not.toContain("superseded-job");
+    expect(JSON.stringify(context.messages)).toContain("surviving segment");
+    original.onShellJobComplete!(snapshot("surviving-job"), "first-shell");
+    await expect.poll(() => mocks.runCyreneAgent.mock.calls.length).toBe(2);
+  });
+
   it("a workspace mutation does not cancel foreground work or another conversation", async () => {
     const original = await start();
     await expect.poll(() => bridge.__getSessionActiveRunForTest("original")).toBeUndefined();

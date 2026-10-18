@@ -5,6 +5,7 @@ import { createInternalTranscriptMessage } from "./harness/internal-transcript";
 export interface ShellCompletionSource {
   conversationId: string;
   sourceRunId: string;
+  sourceToolCallId?: string;
   sourceWorkspace?: string;
   snapshot: Pick<ShellJobSnapshot, "jobId">;
   /** 进程退出后，原运行仍可能被用户取消。 */

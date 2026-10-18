@@ -49,7 +49,7 @@ export interface ToolContext {
   /** 仅供前台 run_shell 观察输出；异常不得影响命令执行。 */
   onShellOutput?: (update: ShellOutputUpdate) => void;
   /** 后台结束事件由主进程负责投递，不接受模型传入的回调。 */
-  onShellJobComplete?: (snapshot: import("../builtin-tools/shell-job-manager").ShellJobSnapshot) => void;
+  onShellJobComplete?: (snapshot: import("../builtin-tools/shell-job-manager").ShellJobSnapshot, sourceToolCallId?: string) => void;
   /** 未来扩展兜底；当前为空对象，不预设字段。遵循"地基通用，上层克制"。 */
   metadata?: Record<string, unknown>;
 }

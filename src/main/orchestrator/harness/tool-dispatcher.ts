@@ -320,10 +320,14 @@ export async function dispatchToolCall(
     : args.url !== undefined ? [String(args.url)]
     : [];
 
-  const shellContext = call.name === "run_shell" && ctx.onEvent
+  const shellContext = call.name === "run_shell"
     ? {
         ...ctx.toolContext,
         userQuery: ctx.toolContext?.userQuery ?? "",
+        // 在执行时冻结调用锚点，迟到回调不能借用后续插话的分组。
+        onShellJobComplete: ctx.toolContext?.onShellJobComplete
+          ? (snapshot: import("../tools/builtin-tools/shell-job-manager").ShellJobSnapshot) => ctx.toolContext!.onShellJobComplete!(snapshot, call.id)
+          : undefined,
         onShellOutput: (update: import("../tools/registry/tool-context").ShellOutputUpdate) => {
           try { ctx.toolContext?.onShellOutput?.(update); } catch { /* 观察者不能中断命令 */ }
           try { ctx.onEvent?.({ type: "tool_output", toolCallId: call.id, ...update }); } catch { /* UI 事件不能中断命令 */ }
