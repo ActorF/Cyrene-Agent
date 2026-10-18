@@ -59,12 +59,30 @@ import type { PluginPromptMode, PluginTurnCompletedEvent } from "../plugins/type
 import { ShellCompletionDispatcher, type ShellCompletionSource } from "./orchestrator/shell-completion-dispatcher";
 
 let shellCompletions: ShellCompletionDispatcher | undefined;
+// 失败的旧队列保留到持久化成功；并发重试共享同一次处置。
+const retiringShellDispatchers = new Map<ShellCompletionDispatcher, Promise<void> | undefined>();
+async function retryShellDisposals(dispatchers = [...retiringShellDispatchers.keys()]): Promise<void> {
+  const results = await Promise.allSettled(dispatchers.map(dispatcher => {
+    if (!retiringShellDispatchers.has(dispatcher)) return;
+    const running = retiringShellDispatchers.get(dispatcher);
+    if (running) return running;
+    const operation = dispatcher.dispose().then(
+      () => { retiringShellDispatchers.delete(dispatcher); },
+      error => { retiringShellDispatchers.set(dispatcher, undefined); throw error; },
+    );
+    retiringShellDispatchers.set(dispatcher, operation);
+    return operation;
+  }));
+  const failure = results.find(result => result.status === "rejected");
+  if (failure?.status === "rejected") throw failure.reason;
+}
 const backgroundRunControllers = new Map<AbortController, Promise<void>>();
 function shellWorkspaceIdentity(binding?: { workspaceRoot: string; boundAt: number }): string {
   return JSON.stringify([binding?.workspaceRoot ?? null, binding?.boundAt ?? null]);
 }
 export async function disposeShellCompletionDispatch(): Promise<void> {
-  const disposed = shellCompletions?.dispose();
+  if (shellCompletions) retiringShellDispatchers.set(shellCompletions, undefined);
+  const disposed = retryShellDisposals();
   shellCompletions = undefined;
   // abort 只发出取消信号；会话守卫的 settled 才代表轨迹、回执和清理已完成。
   const settlements = [...backgroundRunControllers.values()];
@@ -393,7 +411,21 @@ export function registerAgUiIpc(
   }
 
   const onFinished = onRunFinished;
+  // 只重试本次注册之前的队列，避免新队列处置时等待自身。
+  const predecessors = [...retiringShellDispatchers.keys(), ...(shellCompletions ? [shellCompletions] : [])];
   const previousDispatchDisposed = disposeShellCompletionDispatch();
+  void previousDispatchDisposed.catch(() => {});
+  let previousDispatchReady = false;
+  const waitPreviousDispatch = async () => {
+    if (previousDispatchReady) return;
+    try { await previousDispatchDisposed; }
+    catch {
+      if (previousDispatchReady) return;
+      await retryShellDisposals(predecessors);
+      await Promise.all([...pendingBackgroundRetirements.keys()].map(retryBackgroundRetirements));
+    }
+    previousDispatchReady = true;
+  };
   const retireCompletion = async (completion: ShellCompletionSource) => {
     if (!await chatsStore.getSession(completion.conversationId)) {
       inbox.discard(completion.conversationId);
@@ -415,7 +447,7 @@ export function registerAgUiIpc(
   };
   const inbox = new ShellCompletionDispatcher({
     append: async (completion, message) => {
-      await previousDispatchDisposed;
+      await waitPreviousDispatch();
       if (!await chatsStore.getSession(completion.conversationId)) {
         inbox.discard(completion.conversationId);
         return;
@@ -449,7 +481,7 @@ export function registerAgUiIpc(
   shellCompletions = inbox;
   const dispatchRun = async (event: { sender?: WebContents }, rawInput: unknown, background = false, sourceCompletion?: ShellCompletionSource) => {
     const sourceWorkspace = sourceCompletion?.sourceWorkspace;
-    await previousDispatchDisposed;
+    await waitPreviousDispatch();
     if (!buildOptionsFn || !onFinished) {
       throw new Error("AG-UI 桥未初始化");
     }

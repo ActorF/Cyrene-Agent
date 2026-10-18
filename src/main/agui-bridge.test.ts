@@ -2069,6 +2069,41 @@ describe("agui-bridge background shell smoke (mock sessions, isolated SQLite)", 
     } finally { failure.mockRestore(); }
   });
 
+  it.each([false, true])("retries failed previous disposal and preserves its pending result (reregister=%s)", async reregister => {
+    const original = await start();
+    await expect.poll(() => bridge.__getSessionActiveRunForTest("original")).toBeUndefined();
+    const { getConversationTranscriptStore } = await import("./orchestrator/conversation-transcript-store");
+    const store = getConversationTranscriptStore(mocks.userDataRoot);
+    const append = store.append.bind(store);
+    let fail = true;
+    const spy = vi.spyOn(store, "append").mockImplementation(async (...args) => {
+      if (fail && args[1].kind === "background_event_pending") throw new Error("TRANSIENT_DISPOSE_SAVE");
+      return append(...args);
+    });
+    original.onShellJobComplete!(snapshot("old-pending"));
+    bridge.registerAgUiIpc(async input => ({ options: { settings: { provider: "test", baseUrl: "", model: "fake", apiKey: "" },
+      messages: input.modelContext?.messages ?? [], toolSystemContent: "TOOL", soulSystemBaseContent: "SOUL" }, latestUserText: "fixture" }), async () => {}, () => null);
+    try {
+      await expect(mocks.handlers.get(IPC.AGUI_RUN)!({}, { sessionId: "original", assistantTurnId: "failed-retry" })).rejects.toThrow();
+      expect(mocks.runCyreneAgent).toHaveBeenCalledTimes(1);
+      fail = false;
+      if (reregister) {
+        // 再次注册接管失败的前代，同时保存新队列里的迟到结果。
+        original.onShellJobComplete!(snapshot("second-pending"));
+        bridge.registerAgUiIpc(async input => ({ options: { settings: { provider: "test", baseUrl: "", model: "fake", apiKey: "" },
+          messages: input.modelContext?.messages ?? [], toolSystemContent: "TOOL", soulSystemBaseContent: "SOUL" }, latestUserText: "fixture" }), async () => {}, () => null);
+      }
+      mocks.skipDefaultRunFinished = true; mocks.neverComplete = true; mocks.completeOnAbort = true;
+      await mocks.handlers.get(IPC.AGUI_RUN)!({}, { sessionId: "original", assistantTurnId: "recovered-retry" });
+      const recovered = mocks.runCyreneAgent.mock.calls[1][0] as typeof original;
+      expect(await recovered.pollShellCompletions!()).toHaveLength(reregister ? 2 : 1);
+      expect(await recovered.pollShellCompletions!()).toEqual([]);
+      const audit = await store.readAuditEntries("original");
+      expect(audit.filter(entry => entry.kind === "background_event_pending")).toHaveLength(reregister ? 2 : 1);
+      expect(audit.filter(entry => entry.kind === "background_event")).toHaveLength(reregister ? 2 : 1);
+    } finally { fail = false; spy.mockRestore(); }
+  });
+
   it("waits for the previous dispatcher write before running a newly registered bridge", async () => {
     const original = await start();
     await expect.poll(() => bridge.__getSessionActiveRunForTest("original")).toBeUndefined();
