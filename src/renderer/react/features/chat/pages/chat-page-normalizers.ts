@@ -49,6 +49,11 @@ export function parseSessionRunActiveError(message: string): string | undefined 
   return /SESSION_RUN_ACTIVE:(run-[A-Za-z0-9-]+)/.exec(message)?.[1];
 }
 
+/** 跨会话 Learn 互斥不能复用同会话的接管操作。 */
+export function parseLearnRunActiveError(message: string): string | undefined {
+  return /LEARN_RUN_ACTIVE:(run-[A-Za-z0-9-]+)/.exec(message)?.[1];
+}
+
 export function permissionInteraction(request: PermissionApprovalRequest): ComposerInteraction {
   const target = [request.args.path, request.args.filePath]
     .find((value): value is string => typeof value === "string" && value.trim().length > 0);

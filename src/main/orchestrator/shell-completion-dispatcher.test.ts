@@ -98,6 +98,43 @@ describe("shell completion inbox", () => {
     expect(deps.wake).not.toHaveBeenCalled();
   });
 
+  it("persists arrivals during the final failing wake without another automatic run", async () => {
+    vi.useFakeTimers();
+    const { dispatcher, deps } = setup();
+    let rejectFinal!: (error: Error) => void;
+    deps.wake.mockRejectedValueOnce(new Error("fail-1")).mockRejectedValueOnce(new Error("fail-2"))
+      .mockImplementationOnce(() => new Promise<void>((_resolve, reject) => { rejectFinal = reject; }));
+    dispatcher.enqueue(completion());
+    await vi.advanceTimersByTimeAsync(3_001);
+    expect(deps.wake).toHaveBeenCalledTimes(3);
+    dispatcher.enqueue(completion("original", "during-final-wake"));
+    await vi.advanceTimersByTimeAsync(1);
+    rejectFinal(new Error("fail-3"));
+    await vi.advanceTimersByTimeAsync(1);
+    expect(deps.append).toHaveBeenCalledTimes(2);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(deps.wake).toHaveBeenCalledTimes(3);
+  });
+
+  it("bounds repeated wake failures and retains results until explicit resume", async () => {
+    vi.useFakeTimers();
+    const { dispatcher, deps } = setup();
+    deps.wake.mockRejectedValue(new Error("INVALID_CONFIG"));
+    dispatcher.enqueue(completion());
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(deps.wake).toHaveBeenCalledTimes(3);
+    expect(deps.onError).toHaveBeenCalledTimes(3);
+    dispatcher.enqueue(completion("original", "job-2"));
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(deps.append).toHaveBeenCalledTimes(2);
+    expect(deps.wake).toHaveBeenCalledTimes(3);
+    expect(await dispatcher.prepare("original")).toHaveLength(2);
+    deps.wake.mockResolvedValue();
+    dispatcher.resume("original");
+    await vi.advanceTimersByTimeAsync(1);
+    expect(deps.wake).toHaveBeenCalledTimes(4);
+  });
+
   it("retains failed persistence and retries without dispatching an uncommitted fact", async () => {
     vi.useFakeTimers();
     const { dispatcher, deps } = setup();

@@ -470,6 +470,8 @@ export function registerAgUiIpc(
     },
     retire: retireCompletion,
     isBusy: sessionId => sessionActiveRuns.has(sessionId),
+    canWakeNow: async sessionId => (await chatsStore.getSession(sessionId))?.mode !== "learn"
+      || ![...sessionActiveRuns.values()].some(run => run.mode === "learn"),
     canDeliver: canDeliverCompletion,
     wake: async (sessionId, eventId, completion) => {
       if (!await chatsStore.getSession(sessionId)) { inbox.discard(sessionId); return; }

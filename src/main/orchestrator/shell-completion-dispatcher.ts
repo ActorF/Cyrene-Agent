@@ -32,11 +32,12 @@ export class ShellCompletionDispatcher {
   private operations = new Set<Promise<void>>();
   private timers = new Map<string, ReturnType<typeof setTimeout>>();
   private stopped = false;
+  private wakeFailures = new Map<string, number>();
   private wakeBlocked = new Set<string>();
   private wakeSuspensions = new Map<string, Set<symbol>>();
 
   suppressWake(conversationId: string): void { this.wakeBlocked.add(conversationId); }
-  resume(conversationId: string): void { this.wakeBlocked.delete(conversationId); this.kick(conversationId); }
+  resume(conversationId: string): void { this.wakeFailures.delete(conversationId); this.wakeBlocked.delete(conversationId); this.kick(conversationId); }
 
   /** 每次会话变更独占一个暂停令牌，最后一个操作退出后才允许唤醒。 */
   suspendWake(conversationId: string): (committed?: boolean) => void {
@@ -63,6 +64,7 @@ export class ShellCompletionDispatcher {
     append(event: ShellCompletionSource, message: ChatMessage): Promise<void>;
     deliver?(event: ShellCompletionSource, message: ChatMessage): Promise<void>;
     isBusy(conversationId: string): boolean;
+    canWakeNow?(conversationId: string): Promise<boolean>;
     wake(conversationId: string, eventId: string, event: ShellCompletionSource): Promise<void>;
     canDeliver?(event: ShellCompletionSource): Promise<boolean>;
     retire?(event: ShellCompletionSource): Promise<void>;
@@ -165,20 +167,35 @@ export class ShellCompletionDispatcher {
   private async flush(conversationId: string): Promise<void> {
     if (this.stopped || this.flushing.has(conversationId)) return;
     this.flushing.add(conversationId);
+    let saveCompleted = false;
     try {
       await this.save(conversationId);
+      saveCompleted = true;
       await this.retireMismatched(conversationId);
       if (this.stopped || this.deps.isBusy(conversationId)) return;
+      if ((this.wakeFailures.get(conversationId) ?? 0) >= 3) return;
+      if (this.deps.canWakeNow && !await this.deps.canWakeNow(conversationId)) {
+        this.kick(conversationId, 1_000);
+        return;
+      }
       const queue = this.pending.get(conversationId);
       const next = this.canWake(conversationId) ? [...queue?.values() ?? []].find(item => item.saved && !item.event.signal?.aborted) : undefined;
-      if (next) await this.deps.wake(conversationId, next.event.snapshot.jobId, next.event);
+      if (next) {
+        await this.deps.wake(conversationId, next.event.snapshot.jobId, next.event);
+        this.wakeFailures.delete(conversationId);
+      }
       else if ([...queue?.values() ?? []].some(item => !item.saved)) this.kick(conversationId);
       else if (!this.wakeSuspensions.has(conversationId)) this.pending.delete(conversationId); // 暂停期间保留队列，删除回滚可恢复唤醒。
     } catch (error) {
       this.deps.onError(error);
-      this.kick(conversationId, 1_000);
+      const failures = (this.wakeFailures.get(conversationId) ?? 0) + 1;
+      this.wakeFailures.set(conversationId, failures);
+      // 连续失败三次后保留收件，等待用户主动运行；新收件仍先持久化。
+      if (failures < 3) this.kick(conversationId, 1_000 * 2 ** (failures - 1));
     } finally {
       this.flushing.delete(conversationId);
+      // 唤醒期间的新收件定时器可能已遇到 flushing；即使暂停唤醒也要继续落盘。
+      if (saveCompleted && [...this.pending.get(conversationId)?.values() ?? []].some(item => !item.saved)) this.kick(conversationId);
     }
   }
 
@@ -189,6 +206,7 @@ export class ShellCompletionDispatcher {
     for (const timer of this.timers.values()) clearTimeout(timer);
     this.timers.clear();
     this.wakeBlocked.clear();
+    this.wakeFailures.clear();
     this.wakeSuspensions.clear();
     // 停止唤醒后仍须保存未启动定时器的队列，并等待在途写入遍历完其余条目。
     const results = await Promise.allSettled([

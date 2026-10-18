@@ -94,6 +94,7 @@
     "toolCallFallbackName": "工具调用",
     "errorModelRequestFailed": "模型请求失败",
     "errorModelRequestStartFailed": "模型请求发起失败",
+    "learnRunActiveNotice": "另一个学习会话正在运行，本轮尚未执行。请等待该任务结束后重试。",
     "sessionRunActiveNotice": "当前会话已有正在运行的任务（可能来自刷新前的旧运行），本轮未执行。",
     "errorModelRequestFailedWith": "模型请求失败：{{message}}",
     "errorChatStoreUnavailable": "聊天会话服务尚未就绪",

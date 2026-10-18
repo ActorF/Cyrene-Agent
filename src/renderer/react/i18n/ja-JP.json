@@ -110,6 +110,7 @@
     "toolCallFallbackName": "ツール呼び出し",
     "errorModelRequestFailed": "モデルリクエストに失敗しました",
     "errorModelRequestStartFailed": "モデルリクエストの開始に失敗しました",
+    "learnRunActiveNotice": "別の学習会話が実行中のため、このターンはまだ実行されていません。そのタスクが完了してから再試行してください。",
     "sessionRunActiveNotice": "現在の会話には実行中のタスクがあります（更新前の古い実行である可能性があります）。今回は実行されませんでした。",
     "errorModelRequestFailedWith": "モデルリクエストに失敗しました：{{message}}",
     "errorChatStoreUnavailable": "チャットセッションサービスの準備ができていません",
