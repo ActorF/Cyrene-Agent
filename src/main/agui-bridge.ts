@@ -460,7 +460,7 @@ export function registerAgUiIpc(
     },
     deliver: async (completion, message) => {
       const run = sessionActiveRuns.get(completion.conversationId);
-      if (run?.background) run.completions.set(completion.snapshot.jobId, completion);
+      if (run) run.completions.set(completion.snapshot.jobId, completion);
       // 收件事实不参与模型顺序；仅在请求边界提交可重放的投递位置。
       await transcriptStore.append(completion.conversationId, {
         kind: "background_event", id: "shell-delivered:" + completion.snapshot.jobId,
@@ -943,7 +943,7 @@ export function registerAgUiIpc(
         console.warn("[AgUiBridge] 插话标记复位失败:", err);
       }
       const run = sessionActiveRuns.get(sessionId);
-      if (background && settlementGate.get()?.status !== "success" && run?.runId === runId
+      if (settlementGate.get()?.status !== "success" && run?.runId === runId && run.completions.size > 0
         && !pendingBackgroundRetirements.get(sessionId)?.has(run)) {
         let pending = pendingBackgroundRetirements.get(sessionId);
         if (!pending) pendingBackgroundRetirements.set(sessionId, pending = new Set());

@@ -21,7 +21,7 @@ const mocks = vi.hoisted(() => ({
   requestUserClarification: vi.fn(),
   agentEvents: [] as unknown[],
   failRuns: new Map<string, () => void>(),
-  finishRuns: new Map<string, () => void>(),
+  finishRuns: new Map<string, (result?: unknown) => void>(),
   // 可定制的终态行为
   runFinishedResult: undefined as unknown,
   emitDuplicateRunFinished: false,
@@ -71,7 +71,7 @@ vi.mock("./orchestrator/cyrene-agent", () => ({
       const signal = (options as { signal?: AbortSignal } | null | undefined)?.signal;
       return new Observable((subscriber) => {
         mocks.failRuns.set(runId!, () => subscriber.error(new Error("MODEL_STREAM_FAILED")));
-        mocks.finishRuns.set(runId!, () => { subscriber.next({ type: "RUN_FINISHED", runId }); subscriber.complete(); });
+        mocks.finishRuns.set(runId!, (result?: unknown) => { subscriber.next({ type: "RUN_FINISHED", runId, result }); subscriber.complete(); });
         this.lastResult = { reply: "抱抱你", toolResults: [] };
         subscriber.next({ type: "RUN_STARTED", runId });
         for (const event of mocks.agentEvents) subscriber.next(event);
@@ -1819,6 +1819,43 @@ describe("agui-bridge background shell smoke (mock sessions, isolated SQLite)", 
     expect(entries.filter(entry => entry.kind === "background_event")).toHaveLength(1);
     expect(entries.filter(entry => entry.kind === "user")).toHaveLength(0);
     await expect.poll(() => bridge.__getSessionActiveRunForTest("original")).toBeUndefined();
+  });
+
+  it.each(["runtime_error", "stream_error", "cancelled", "retirement_failure", "success"])("settles foreground Shell consumption safely: %s", async outcome => {
+    mocks.skipDefaultRunFinished = true; mocks.neverComplete = true; mocks.completeOnAbort = true;
+    const original = await start();
+    original.onShellJobComplete!(snapshot("foreground-A"));
+    expect(await original.pollShellCompletions!()).toHaveLength(1);
+    expect(await original.pollShellCompletions!()).toEqual([]);
+    const { getConversationTranscriptStore } = await import("./orchestrator/conversation-transcript-store");
+    const { ConversationJournalService } = await import("./orchestrator/conversation-journal-service");
+    const store = getConversationTranscriptStore(mocks.userDataRoot);
+    const append = store.append.bind(store);
+    let failRetirement = outcome === "retirement_failure";
+    const spy = vi.spyOn(store, "append").mockImplementation(async (...args) => {
+      if (failRetirement && args[1].kind === "background_event_retired") throw new Error("RETIRE_FAILED");
+      return append(...args);
+    });
+    try {
+      if (outcome === "stream_error") mocks.failRuns.get(original.runId!)!();
+      else if (outcome === "cancelled") mocks.handlers.get(IPC.AGUI_CANCEL)!({}, original.runId);
+      else mocks.finishRuns.get(original.runId!)!({ status: outcome === "success" ? "success" : "runtime_error", reason: "fixture" });
+      await expect.poll(() => bridge.__getSessionActiveRunForTest("original")).toBeUndefined();
+      if (failRetirement) {
+        await expect(bridge.prepareBackgroundSessionMutation("original")).rejects.toThrow("RETIRE_FAILED");
+        failRetirement = false;
+      }
+      const finish = await bridge.prepareBackgroundSessionMutation("original");
+      mocks.getSession.mockImplementation((id: string) => ({ id, mode: "code", messages: [],
+        workspaceBinding: { workspaceRoot: path.join(mocks.userDataRoot, "B"), displayName: "B", boundAt: 2 } }));
+      finish(true);
+      const context = await new ConversationJournalService({ store }).buildModelContext("original");
+      expect(JSON.stringify(context.messages).includes("foreground-A")).toBe(outcome === "success");
+      const audit = await store.readAuditEntries("original");
+      expect(audit.filter(entry => entry.kind === "background_event")).toHaveLength(1);
+      expect(audit.filter(entry => entry.kind === "background_event_retired")).toHaveLength(outcome === "success" ? 0 : 1);
+      expect(mocks.runCyreneAgent).toHaveBeenCalledTimes(1);
+    } finally { failRetirement = false; spy.mockRestore(); }
   });
 
   it.each(["runtime_error", "stream_error"])("retires acknowledged output after %s before rebinding", async failure => {
