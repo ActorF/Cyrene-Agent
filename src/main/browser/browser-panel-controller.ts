@@ -17,6 +17,13 @@ import { registerExamPageSource } from "../learn/exam-page-authority";
 import { appendBrowserObservationLog } from "./browser-observation-log";
 import { navigationErrorCode, parseHttpUrl } from "./http-url";
 import {
+  DEFAULT_BROWSER_VIEWPORT_MODE,
+  mobileUserAgent,
+  resolveUserAgentKind,
+  type BrowserUserAgentKind,
+  type BrowserViewportMode,
+} from "../../shared/browser-viewport";
+import {
   capturePlaywrightPageSnapshot,
   cancelPlaywrightElementPicker,
   readPlaywrightElementPicker,
@@ -47,7 +54,16 @@ interface BrowserTab {
   unregisterExamPage?: () => void;
   view: WebContentsView | null;
   state: BrowserPanelTabState;
+  /** 视图创建时的默认（桌面）UA，切回桌面版时恢复。 */
+  desktopUserAgent?: string;
+  /** 该标签视图当前使用的身份。 */
+  userAgentKind?: BrowserUserAgentKind;
+  /** 身份已切换但页面还按旧身份渲染，激活时需要重新加载。 */
+  needsUserAgentReload?: boolean;
 }
+
+/** 拖动分隔条时宽度连续变化，停下后再切换身份并刷新，避免反复重载。 */
+const USER_AGENT_SWITCH_DELAY_MS = 300;
 
 interface BrowserObservationRecord {
   tabId: string;
@@ -89,6 +105,9 @@ export class BrowserPanelController {
   private controlAction: "starting" | "opening" | "switching" | "clicking" | "filling" | "pressing" | "scrolling" | "screenshot" | "active" | undefined;
   private controlActionTimer: ReturnType<typeof setTimeout> | null = null;
   private readonly observedWindows = new WeakSet<BrowserWindow>();
+  private getViewportMode: () => BrowserViewportMode = () => DEFAULT_BROWSER_VIEWPORT_MODE;
+  private userAgentKind: BrowserUserAgentKind = "desktop";
+  private userAgentSwitchTimer: ReturnType<typeof setTimeout> | null = null;
   private readonly onPlaywrightSnapshotNavigation = (contents: WebContents): void => {
     resetPlaywrightPageSnapshot(contents);
   };
@@ -956,6 +975,8 @@ export class BrowserPanelController {
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
+    if (this.userAgentSwitchTimer) clearTimeout(this.userAgentSwitchTimer);
+    this.userAgentSwitchTimer = null;
     this.controlLease = null;
     if (this.controlActionTimer) clearTimeout(this.controlActionTimer);
     this.controlActionTimer = null;
@@ -1145,6 +1166,11 @@ export class BrowserPanelController {
       },
     });
     tab.view = view;
+    // 新视图按当前身份创建，随后的 loadURL 直接拿到对应版式；考试页是应用内页面，不切换身份
+    tab.desktopUserAgent = view.webContents.getUserAgent();
+    tab.userAgentKind = isExam ? "desktop" : this.userAgentKind;
+    tab.needsUserAgentReload = false;
+    if (tab.userAgentKind === "mobile") view.webContents.setUserAgent(mobileUserAgent(process.versions.chrome));
     if (isExam) {
       const page = parseLearnExamPageRequest(tab.state.url);
       if (page?.kind === "document" && tab.examConversationId) {
@@ -1299,6 +1325,52 @@ export class BrowserPanelController {
     for (const tab of this.tabs) {
       const viewBounds = tab.id === this.activeTabId ? { x, y, width, height } : { x: 0, y: 0, width: 0, height: 0 };
       tab.view?.setBounds(viewBounds);
+    }
+    this.updateUserAgentKind(width);
+  }
+
+  /** 视口模式：注册时注入设置读取函数，每次判断都读最新值。 */
+  setViewportModeGetter(getter: () => BrowserViewportMode): void {
+    this.getViewportMode = getter;
+  }
+
+  /** 设置里切换模式后调用；applyBounds 只在尺寸变化时触发，这里立即按当前宽度重新判断。 */
+  refreshViewportMode(): void {
+    this.applyBounds();
+  }
+
+  private updateUserAgentKind(width: number): void {
+    const next = resolveUserAgentKind(this.getViewportMode(), width, this.userAgentKind);
+    if (next !== this.userAgentKind) {
+      this.userAgentKind = next;
+      if (this.userAgentSwitchTimer) clearTimeout(this.userAgentSwitchTimer);
+      this.userAgentSwitchTimer = setTimeout(() => {
+        this.userAgentSwitchTimer = null;
+        this.syncUserAgents();
+      }, USER_AGENT_SWITCH_DELAY_MS);
+    } else if (!this.userAgentSwitchTimer) {
+      // 身份未变时也检查一次：切到之前在后台、还按旧身份渲染的标签时补刷新
+      this.syncUserAgents();
+    }
+  }
+
+  private syncUserAgents(): void {
+    if (this.disposed) return;
+    for (const tab of this.tabs) {
+      const view = tab.view;
+      if (!view || view.webContents.isDestroyed() || tab.kind === "exam") continue;
+      if (tab.userAgentKind === this.userAgentKind) continue;
+      view.webContents.setUserAgent(this.userAgentKind === "mobile"
+        ? mobileUserAgent(process.versions.chrome)
+        : tab.desktopUserAgent ?? view.webContents.getUserAgent());
+      tab.userAgentKind = this.userAgentKind;
+      tab.needsUserAgentReload = !!tab.state.url;
+    }
+    // 只刷新当前可见的标签；后台标签在切过去时再刷新
+    const active = this.getActiveTab();
+    if (active?.needsUserAgentReload && active.view && !active.view.webContents.isDestroyed()) {
+      active.needsUserAgentReload = false;
+      active.view.webContents.reload();
     }
   }
 
