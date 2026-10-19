@@ -88,7 +88,7 @@ export async function disposeShellCompletionDispatch(): Promise<void> {
   const settlements = [...backgroundRunControllers.values()];
   for (const controller of backgroundRunControllers.keys()) controller.abort();
   const results = await Promise.allSettled([disposed, ...settlements,
-    ...[...pendingCompletionRetirements.keys()].map(retryCompletionRetirements),
+    ...[...pendingCompletionRetirements.keys()].map(id => retryCompletionRetirements(id, false)),
   ]);
   const failure = results.find(result => result.status === "rejected");
   if (failure?.status === "rejected") throw failure.reason;
@@ -302,10 +302,21 @@ async function retireRunCompletions(sessionId: string, run: SessionActiveRun): P
   if (!pending.size && pendingCompletionRetirements.get(sessionId) === pending) pendingCompletionRetirements.delete(sessionId);
 }
 
-async function retryCompletionRetirements(sessionId: string): Promise<void> {
+let completionSettlementTimeoutMs = 5_000;
+export function __setCompletionSettlementTimeoutForTest(ms: number): void { completionSettlementTimeoutMs = ms; }
+
+async function retryCompletionRetirements(sessionId: string, bounded = true): Promise<void> {
   for (const run of [...pendingCompletionRetirements.get(sessionId) ?? []]) {
-    await run.settled;
-    await retireRunCompletions(sessionId, run);
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      await (bounded ? Promise.race([run.settled, new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error("SHELL_COMPLETION_SETTLEMENT_TIMEOUT")), completionSettlementTimeoutMs);
+      })]) : run.settled);
+    } finally { clearTimeout(timer); }
+    for (let attempt = 0; ; attempt++) {
+      try { await retireRunCompletions(sessionId, run); break; }
+      catch (error) { if (attempt >= 2) throw error; }
+    }
   }
 }
 
@@ -444,7 +455,7 @@ export function registerAgUiIpc(
     catch {
       if (previousDispatchReady) return;
       await retryShellDisposals(predecessors);
-      await Promise.all([...pendingCompletionRetirements.keys()].map(retryCompletionRetirements));
+      await Promise.all([...pendingCompletionRetirements.keys()].map(id => retryCompletionRetirements(id)));
     }
     previousDispatchReady = true;
   };
@@ -453,7 +464,7 @@ export function registerAgUiIpc(
       inbox.discard(completion.conversationId);
       return;
     }
-    const entries = await transcriptStore.readAuditEntries(completion.conversationId);
+    const entries = await transcriptStore.readShellCompletionEntries(completion.conversationId);
     const source = entries.find(entry => entry.kind === "background_event" && entry.payload.jobId === completion.snapshot.jobId)
       ?? entries.find(entry => entry.kind === "background_event_pending" && entry.payload.jobId === completion.snapshot.jobId);
     await transcriptStore.append(completion.conversationId, {
@@ -463,7 +474,7 @@ export function registerAgUiIpc(
   };
   const canDeliverCompletion = async (completion: ShellCompletionSource) => {
     if (completion.sourceWorkspace !== shellWorkspaceIdentity((await chatsStore.getSession(completion.conversationId))?.workspaceBinding)) return false;
-    const entries = await transcriptStore.readAuditEntries(completion.conversationId);
+    const entries = await transcriptStore.readShellCompletionEntries(completion.conversationId, true);
     if (entries.some(entry => entry.kind === "background_event_retired" && entry.payload.jobId === completion.snapshot.jobId)) return false;
     return !isTranscriptRunSuperseded(entries, completion.sourceRunId, completion.sourceToolCallId);
   };
@@ -619,6 +630,7 @@ export function registerAgUiIpc(
     await retryCompletionRetirements(sessionId);
     const runAbortController = new AbortController();
     let releaseSessionGuard: (() => void) | null = null;
+    let ownedGuard!: SessionActiveRun;
     for (let takeovers = 0; ; takeovers++) {
       const existing = sessionActiveRuns.get(sessionId);
       if (!existing) {
@@ -632,7 +644,7 @@ export function registerAgUiIpc(
         const settled = new Promise<void>((resolve) => { resolveSettled = resolve; });
         // 并发 takeover 中只有一个能走到这里（await 醒来后必须回顶部重新竞争）
         const completions = new Map<string, ShellCompletionSource>();
-        sessionActiveRuns.set(sessionId, {
+        ownedGuard = {
           mode,
           runId,
           background,
@@ -642,7 +654,8 @@ export function registerAgUiIpc(
           },
           abort: () => runAbortController.abort(),
           settled,
-        });
+        };
+        sessionActiveRuns.set(sessionId, ownedGuard);
         releaseSessionGuard = () => releaseSessionGuardEntry(sessionId, runId, resolveSettled);
         break;
       }
@@ -676,16 +689,17 @@ export function registerAgUiIpc(
       }
       const receipt = await database.call<DispatchReceipt>("runs.admit", sessionId, requestId, requestFacts, runId);
       if (receipt.duplicate) { releaseSessionGuard?.(); endConversation(); return duplicateAck(receipt); }
-      const guard = sessionActiveRuns.get(sessionId);
+      const guard = ownedGuard;
+      if (sessionActiveRuns.get(sessionId) !== guard) throw new Error("SESSION_RUN_OWNERSHIP_LOST");
       runId = receipt.runId;
-      if (guard) guard.runId = runId;
+      guard.runId = runId;
       admitted = true;
       if (background) {
         if (!inbox.canWake(sessionId)) throw new Error("SHELL_COMPLETION_CANCELLED");
-        backgroundRunControllers.set(runAbortController, guard!.settled);
+        backgroundRunControllers.set(runAbortController, guard.settled);
       } else {
         // 退出/重注册会清空内存队列，下一次主动运行从审计事实恢复尚未投递的结果。
-        const entries = await transcriptStore.readAuditEntries(sessionId);
+        const entries = await transcriptStore.readShellCompletionEntries(sessionId);
         const closed = new Set(entries.flatMap(entry => entry.kind === "background_event" || entry.kind === "background_event_retired"
           ? [entry.payload.jobId] : []));
         inbox.restore(sessionId, entries.flatMap(entry => entry.kind === "background_event_pending" && entry.runId && !closed.has(entry.payload.jobId)

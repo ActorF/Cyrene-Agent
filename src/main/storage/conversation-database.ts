@@ -194,9 +194,10 @@ export class ConversationDatabase {
     this.ensure(record.id);
     this.db.prepare("UPDATE conversations SET record_json=? WHERE id=?").run(JSON.stringify(record), record.id);
   }
-  entries(id: string, audit = false): TranscriptEntry[] {
+  entries(id: string, audit = false, kinds?: TranscriptEntry["kind"][]): TranscriptEntry[] {
     return this.db.prepare(`SELECT entry_json,entry_id,seq,kind FROM transcript_entries WHERE conversation_id=?
-   ${audit ? "" : "AND seq>(SELECT archived_through FROM conversations WHERE id=?)"} ORDER BY seq`).all(...(audit ? [id] : [id, id]))
+   ${audit ? "" : "AND seq>(SELECT archived_through FROM conversations WHERE id=?)"}
+   ${kinds ? `AND kind IN (${kinds.map(() => "?").join(",")})` : ""} ORDER BY seq`).all(...(audit ? [id] : [id, id]), ...(kinds ?? []))
       .map(row => {
       try {
         const entry = JSON.parse(row.entry_json as string) as TranscriptEntry;

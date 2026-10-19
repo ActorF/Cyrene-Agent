@@ -2026,6 +2026,26 @@ describe("agui-bridge background shell smoke (mock sessions, isolated SQLite)", 
     expect(await resumed.pollShellCompletions!()).toEqual([]);
   });
 
+  it("bounds mutation settlement waits without releasing an unresponsive run", async () => {
+    const original = await start();
+    await expect.poll(() => bridge.__getSessionActiveRunForTest("original")).toBeUndefined();
+    mocks.skipDefaultRunFinished = true; mocks.neverComplete = true; mocks.completeOnAbort = false;
+    original.onShellJobComplete!(snapshot("blocked-run"));
+    await expect.poll(() => mocks.runCyreneAgent.mock.calls.length).toBe(2);
+    const resumed = mocks.runCyreneAgent.mock.calls[1][0] as typeof original;
+    bridge.__setCompletionSettlementTimeoutForTest(20);
+    try {
+      await expect(bridge.prepareBackgroundSessionMutation("original")).rejects.toThrow("SHELL_COMPLETION_SETTLEMENT_TIMEOUT");
+      expect(bridge.__getSessionActiveRunForTest("original")).toBe(resumed.runId);
+    } finally {
+      mocks.finishRuns.get(resumed.runId!)!({ status: "cancelled", reason: "fixture" });
+      await expect.poll(() => bridge.__getSessionActiveRunForTest("original")).toBeUndefined();
+      bridge.__setCompletionSettlementTimeoutForTest(5000);
+    }
+    const finish = await bridge.prepareBackgroundSessionMutation("original");
+    finish(false);
+  });
+
   it("retries failed retirement after the cancelled run guard is released", async () => {
     const original = await start();
     await expect.poll(() => bridge.__getSessionActiveRunForTest("original")).toBeUndefined();
@@ -2038,12 +2058,13 @@ describe("agui-bridge background shell smoke (mock sessions, isolated SQLite)", 
     const append = store.append.bind(store);
     let fail = true;
     const spy = vi.spyOn(store, "append").mockImplementation(async (...args) => {
-      if (args[1].kind === "background_event_retired" && fail) { fail = false; throw new Error("RETIRE_FAILED"); }
+      if (args[1].kind === "background_event_retired" && fail) { throw new Error("RETIRE_FAILED"); }
       return append(...args);
     });
     try {
       await expect(bridge.cancelBackgroundConversationRun("original")).rejects.toThrow("RETIRE_FAILED");
       expect(bridge.__getSessionActiveRunForTest("original")).toBeUndefined();
+      fail = false;
       await bridge.cancelBackgroundConversationRun("original");
       const context = await new ConversationJournalService({ store }).buildModelContext("original");
       expect(JSON.stringify(context.messages)).not.toContain("retry-retirement");

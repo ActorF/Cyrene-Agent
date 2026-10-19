@@ -16,6 +16,21 @@ function setup(busy = false) {
 afterEach(async () => { for (const dispatcher of dispatchers.splice(0)) await dispatcher.dispose(); vi.useRealTimers(); });
 
 describe("shell completion inbox", () => {
+  it("does not spend the failure budget on Learn admission contention", async () => {
+    vi.useFakeTimers();
+    const { dispatcher, deps } = setup();
+    let attempts = 0;
+    deps.wake.mockImplementation(async () => {
+      if (++attempts <= 4) throw new Error("LEARN_RUN_ACTIVE:run-other");
+      await dispatcher.take("original");
+    });
+    dispatcher.enqueue(completion());
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(deps.wake).toHaveBeenCalledTimes(5);
+    expect(deps.onError).not.toHaveBeenCalled();
+    expect(await dispatcher.take("original")).toEqual([]);
+  });
+
   it.each([false, true])("keeps overlapping mutation suspensions independent (commit=%s)", async commit => {
     const { dispatcher, deps } = setup();
     const first = dispatcher.suspendWake("original");

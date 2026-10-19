@@ -54,6 +54,19 @@ afterEach(async () => {
 });
 
 describe("ConversationTranscriptStore SQLite", () => {
+  it("filters shell history without losing archived completion or source branch entries", async () => {
+    const { store } = createStore();
+    const user = await store.append("c1", userDraft("user-1", "turn-1", 1, "question"));
+    const event = await store.append("c1", { kind: "background_event", id: "shell-1", at: 1000, payload: { jobId: "job-1", message: { role: "user", visibility: "internal", content: "output" } } });
+    await store.appendPresentationNext("c1", "assistant-1", "patch-1", { content: "display only" });
+    const { createHash } = await import("node:crypto");
+    await store.appendCompactionCheckpoint("c1", { id: "checkpoint", at: 1000, kind: "compaction_checkpoint", payload: { baseThroughSeq: event.seq, sourceThroughSeq: event.seq, sourceDigest: createHash("sha256").update(JSON.stringify([user, event])).digest("hex"), replacement: { role: "system", content: "summary" }, trigger: "manual" } });
+    await store.archiveThrough("c1", event.seq);
+    expect((await store.read("c1")).entries.some(entry => entry.id === event.id)).toBe(false);
+    expect(await store.readShellCompletionEntries("c1")).toEqual([event]);
+    expect(await store.readShellCompletionEntries("c1", true)).toEqual([user, event]);
+    expect(await store.readShellCompletionEntries("other", true)).toEqual([]);
+  });
   it("replays retired completion status after restart while retaining the original output for audit", async () => {
     const { root, store } = createStore();
     const event = await store.append("c1", { kind: "background_event", id: "shell-completed:A", at: 1_000,

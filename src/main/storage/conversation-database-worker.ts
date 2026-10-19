@@ -306,6 +306,10 @@ async function execute(method: string, args: any[]): Promise<unknown> {
     await importTranscript(id);
     if (name === 'read')
       return database.snapshot(id);
+    if (name === 'shellEvents')
+      return database.entries(id, true, args[1]
+        ? ['background_event_pending', 'background_event', 'background_event_retired', 'user', 'assistant', 'turn_rewind', 'turn_tombstone']
+        : ['background_event_pending', 'background_event', 'background_event_retired']);
     if (name === 'audit')
       return database.entries(id, true);
     if (name === 'append')

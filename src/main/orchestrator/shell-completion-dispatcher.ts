@@ -187,6 +187,11 @@ export class ShellCompletionDispatcher {
       else if ([...queue?.values() ?? []].some(item => !item.saved)) this.kick(conversationId);
       else if (!this.wakeSuspensions.has(conversationId)) this.pending.delete(conversationId); // 暂停期间保留队列，删除回滚可恢复唤醒。
     } catch (error) {
+      // Learn 槽位竞争不消耗配置或准备失败的重试额度。
+      if (error instanceof Error && error.message.startsWith("LEARN_RUN_ACTIVE:")) {
+        this.kick(conversationId, 1_000);
+        return;
+      }
       this.deps.onError(error);
       const failures = (this.wakeFailures.get(conversationId) ?? 0) + 1;
       this.wakeFailures.set(conversationId, failures);
