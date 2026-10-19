@@ -1040,6 +1040,8 @@ export class BrowserPanelController {
     tab.state = { ...tab.state, url: url.href, error: undefined, crashed: false };
     this.publish();
     try {
+      // 用当前身份加载；否则模式刚切换、延时同步未到时，那次同步的 reload 会打断本次导航
+      this.applyCurrentUserAgent(tab, view);
       await view.webContents.loadURL(url.href);
       return { ok: true };
     } catch {
@@ -1326,7 +1328,9 @@ export class BrowserPanelController {
       const viewBounds = tab.id === this.activeTabId ? { x, y, width, height } : { x: 0, y: 0, width: 0, height: 0 };
       tab.view?.setBounds(viewBounds);
     }
-    this.updateUserAgentKind(width);
+    // 用渲染层上报的面板宽度判断，而不是按窗口尺寸裁剪后的宽度：
+    // 窗口最小化时内容尺寸为 0，裁剪后宽度也是 0，会被误判为窄面板而切到移动版并重载
+    this.updateUserAgentKind(Math.round(bounds.width));
   }
 
   /** 视口模式：注册时注入设置读取函数，每次判断都读最新值。 */
@@ -1354,16 +1358,23 @@ export class BrowserPanelController {
     }
   }
 
+  /** 把当前身份应用到标签（只影响之后的加载）；即将导航的标签不再需要补刷新。 */
+  private applyCurrentUserAgent(tab: BrowserTab, view: WebContentsView): void {
+    tab.needsUserAgentReload = false;
+    if (tab.kind === "exam" || tab.userAgentKind === this.userAgentKind) return;
+    view.webContents.setUserAgent(this.userAgentKind === "mobile"
+      ? mobileUserAgent(process.versions.chrome)
+      : tab.desktopUserAgent ?? view.webContents.getUserAgent());
+    tab.userAgentKind = this.userAgentKind;
+  }
+
   private syncUserAgents(): void {
     if (this.disposed) return;
     for (const tab of this.tabs) {
       const view = tab.view;
       if (!view || view.webContents.isDestroyed() || tab.kind === "exam") continue;
       if (tab.userAgentKind === this.userAgentKind) continue;
-      view.webContents.setUserAgent(this.userAgentKind === "mobile"
-        ? mobileUserAgent(process.versions.chrome)
-        : tab.desktopUserAgent ?? view.webContents.getUserAgent());
-      tab.userAgentKind = this.userAgentKind;
+      this.applyCurrentUserAgent(tab, view);
       tab.needsUserAgentReload = !!tab.state.url;
     }
     // 只刷新当前可见的标签；后台标签在切过去时再刷新
