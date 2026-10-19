@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isEditingKeystroke, shouldDeferUserAgentReload } from "./user-agent-reload-guard";
+import { isEditingKeystroke, responseVariesByUserAgent, shouldDeferUserAgentReload } from "./user-agent-reload-guard";
 
 describe("视口身份切换后的自动刷新护栏", () => {
   it("页面空闲时可以刷新", () => {
@@ -41,5 +41,18 @@ describe("键盘编辑判定（覆盖 iframe 内输入）", () => {
     [{ type: "keyDown", key: "f", alt: true }],
   ])("不改动内容的按键不算：%j", (input) => {
     expect(isEditingKeystroke(input)).toBe(false);
+  });
+});
+
+describe("缓存响应是否按 User-Agent 区分", () => {
+  it.each([
+    [{ Vary: ["User-Agent"] }, true],
+    [{ vary: ["Accept-Encoding, user-agent"] }, true],
+    [{ Vary: ["*"] }, true],
+    [{ Vary: ["Accept-Encoding"] }, false],
+    [{ "Cache-Control": ["max-age=60"] }, false],
+    [undefined, false],
+  ])("%j → %s", (headers, expected) => {
+    expect(responseVariesByUserAgent(headers)).toBe(expected);
   });
 });

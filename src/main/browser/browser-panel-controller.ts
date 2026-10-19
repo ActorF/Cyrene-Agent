@@ -23,7 +23,14 @@ import {
   type BrowserViewportMode,
 } from "../../shared/browser-viewport";
 import { UserAgentSwitch } from "./user-agent-switch";
-import { isEditingKeystroke, pageHasUserInput, shouldDeferUserAgentReload, watchUserInput } from "./user-agent-reload-guard";
+import {
+  focusedElementIsEditable,
+  isEditingKeystroke,
+  pageHasUserInput,
+  responseVariesByUserAgent,
+  shouldDeferUserAgentReload,
+  watchUserInput,
+} from "./user-agent-reload-guard";
 import {
   capturePlaywrightPageSnapshot,
   cancelPlaywrightElementPicker,
@@ -46,6 +53,9 @@ const EMPTY_TAB_STATE = {
   canGoForward: false,
   crashed: false,
 } as const;
+
+/** 新标签导航等待面板首个可见尺寸的上限；超时仍按当时状态继续导航。 */
+const VISIBLE_BOUNDS_FOR_NAVIGATION_MS = 1500;
 
 interface BrowserTab {
   id: string;
@@ -169,19 +179,8 @@ export class BrowserPanelController {
     if (tab.kind === "exam") return "考试答题页不能作为外部网页控制目标。请先切换到普通网页标签。";
     this.controlLease = { conversationId: input.conversationId, tabId: tab.id };
     this.setControlAction("starting");
-    if (!this.bounds || this.bounds.width <= 0 || this.bounds.height <= 0) {
-      const visible = new Promise<void>((resolve) => {
-        let done = false;
-        const finish = () => {
-          if (done) return;
-          done = true;
-          clearTimeout(timer);
-          this.visibleBoundsWaiters.delete(finish);
-          resolve();
-        };
-        const timer = setTimeout(finish, 8_000);
-        this.visibleBoundsWaiters.add(finish);
-      });
+    if (!this.hasVisibleBounds()) {
+      const visible = this.waitForVisibleBounds(8_000);
       this.openPanelForControl?.();
       await visible;
     }
@@ -1019,6 +1018,27 @@ export class BrowserPanelController {
     return tab;
   }
 
+  private hasVisibleBounds(): boolean {
+    return !!this.bounds && this.bounds.width > 0 && this.bounds.height > 0;
+  }
+
+  /** 等待渲染层上报第一个可见尺寸；超时也返回，由调用方按无尺寸处理。 */
+  private waitForVisibleBounds(timeoutMs: number): Promise<void> {
+    if (this.hasVisibleBounds()) return Promise.resolve();
+    return new Promise<void>((resolve) => {
+      let done = false;
+      const finish = () => {
+        if (done) return;
+        done = true;
+        clearTimeout(timer);
+        this.visibleBoundsWaiters.delete(finish);
+        resolve();
+      };
+      const timer = setTimeout(finish, timeoutMs);
+      this.visibleBoundsWaiters.add(finish);
+    });
+  }
+
   private async navigateTab(tab: BrowserTab, input: string): Promise<BrowserPanelResult> {
     if (this.disposed || !this.tabs.includes(tab)) return { ok: false, error: "unavailable" };
     const url = parseHttpUrl(input);
@@ -1032,6 +1052,12 @@ export class BrowserPanelController {
       tab.state = { id: tab.id, ...EMPTY_TAB_STATE, url: url.href };
     }
     this.forgetTabObservations(tab.id);
+    // 面板刚被打开（例如从聊天里第一次在 Cyrene 中打开链接）时，渲染层稍后才上报宽度；
+    // 先等第一个可见尺寸，新视图才能按实际宽度确定身份，避免先以桌面版请求、再切换重载
+    if (!tab.view && !this.hasVisibleBounds()) {
+      await this.waitForVisibleBounds(VISIBLE_BOUNDS_FOR_NAVIGATION_MS);
+      if (this.disposed || !this.tabs.includes(tab)) return { ok: false, error: "unavailable" };
+    }
     let view: WebContentsView | null;
     try {
       view = this.ensureView(tab, false);
@@ -1068,10 +1094,11 @@ export class BrowserPanelController {
         callback({ requestHeaders: this.withTabUserAgent(details) });
       });
       // 主框架响应来自缓存时（前进后退、缓存命中），文档内容是当初加载时的身份，不能按本次请求头算
+      // 但带 Vary: User-Agent 的缓存只会在 UA 匹配时命中，内容就是本次请求的身份，仍按请求身份记录
       browserSession.webRequest.onResponseStarted((details) => {
-        if (details.resourceType !== "mainFrame") return;
+        if (details.resourceType !== "mainFrame" || !details.fromCache) return;
         const tab = this.findTabByContentsId(details.webContents?.id ?? details.webContentsId);
-        if (tab && details.fromCache) tab.requestedUserAgentKind = undefined;
+        if (tab && !responseVariesByUserAgent(details.responseHeaders)) tab.requestedUserAgentKind = undefined;
       });
       this.desktopUserAgent = browserSession.getUserAgent();
       this.sessionUserAgent = this.desktopUserAgent;
@@ -1214,7 +1241,11 @@ export class BrowserPanelController {
     if (!isExam) {
       view.webContents.on("dom-ready", () => watchUserInput(view.webContents));
       view.webContents.on("before-input-event", (_event, input) => {
-        if (isEditingKeystroke(input)) tab.userTyped = true;
+        if (tab.userTyped || !isEditingKeystroke(input)) return;
+        // 只有焦点在可编辑元素上的按键才算输入：空格翻页、j/k 等网页快捷键不算
+        void focusedElementIsEditable(view.webContents).then((editable) => {
+          if (editable && tab.view === view) tab.userTyped = true;
+        });
       });
       // 任何入口发起的主框架跳转（链接、表单、前进后退、刷新、页面脚本）都按当前身份请求，
       // 请求头见 withTabUserAgent，响应来源见 onResponseStarted

@@ -46,9 +46,9 @@ export interface KeyboardInputLike {
 }
 
 /**
- * 是否是会改动页面内容的按键。before-input-event 覆盖页面内所有 frame（含 iframe 里的表单），
- * 而 DOM 的 input 事件不会跨 frame 冒泡，因此键盘编辑用它来记录。
- * 方向键、Tab、翻页、复制等不改内容的按键不算。
+ * 是否是可能改动页面内容的按键。before-input-event 覆盖页面内所有 frame（含 iframe 里的表单），
+ * 而 DOM 的 input 事件不会跨 frame 冒泡，因此键盘编辑用它来记录；
+ * 还需结合 focusedElementIsEditable 确认焦点在可编辑元素上。方向键、Tab、翻页、复制等不算。
  */
 export function isEditingKeystroke(input: KeyboardInputLike): boolean {
   if (input.type !== "keyDown") return false;
@@ -56,6 +56,44 @@ export function isEditingKeystroke(input: KeyboardInputLike): boolean {
   if (input.control || input.meta) return /^[vx]$/i.test(key);
   if (input.alt) return false;
   return key.length === 1 || key === "Backspace" || key === "Delete" || key === "Enter";
+}
+
+/** 在收到按键的 frame 里判断焦点是否在可编辑元素上（含 shadow DOM 内的输入框）。 */
+export const FOCUSED_ELEMENT_EDITABLE = `(() => {
+  let el = document.activeElement;
+  while (el && el.shadowRoot && el.shadowRoot.activeElement) el = el.shadowRoot.activeElement;
+  if (!el) return false;
+  if (el.isContentEditable) return true;
+  const tag = el.tagName;
+  if (tag === "TEXTAREA" || tag === "SELECT") return !el.disabled && !el.readOnly;
+  if (tag !== "INPUT") return false;
+  const type = (el.getAttribute("type") || "text").toLowerCase();
+  return !el.disabled && !el.readOnly
+    && !["button", "submit", "reset", "image", "hidden", "checkbox", "radio", "range", "color", "file"].includes(type);
+})()`;
+
+/** 焦点所在 frame（含 iframe）的焦点元素是否可编辑。查询失败按「否」处理，交给其他信号判断。 */
+export async function focusedElementIsEditable(contents: WebContents): Promise<boolean> {
+  if (contents.isDestroyed()) return false;
+  const frame = contents.focusedFrame ?? contents.mainFrame;
+  try {
+    return (await frame.executeJavaScript(FOCUSED_ELEMENT_EDITABLE)) === true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * 缓存响应是否按 User-Agent 区分（Vary: User-Agent 或 Vary: *）。
+ * 这类缓存只会在 UA 匹配时命中，内容就是本次请求的身份；否则命中的可能是其他身份时缓存的内容。
+ */
+export function responseVariesByUserAgent(headers: Record<string, string[]> | undefined): boolean {
+  if (!headers) return false;
+  return Object.entries(headers).some(([name, values]) => name.toLowerCase() === "vary"
+    && values.some((value) => value.split(",").some((part) => {
+      const field = part.trim().toLowerCase();
+      return field === "user-agent" || field === "*";
+    })));
 }
 
 export interface UserAgentReloadState {

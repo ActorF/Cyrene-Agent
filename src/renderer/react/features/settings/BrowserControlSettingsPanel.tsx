@@ -17,25 +17,28 @@ export function BrowserControlSettingsPanel() {
   const [status, setStatus] = useState<"cleared" | "failed" | "">("");
   const [viewportMode, setViewportMode] = useState<BrowserViewportMode>(DEFAULT_BROWSER_VIEWPORT_MODE);
   const [viewportModeFailed, setViewportModeFailed] = useState(false);
-  // 读到已保存的模式之前禁用切换：否则较晚返回的读取会把用户刚切换并保存的值在界面上覆盖回去
-  const [viewportModeLoaded, setViewportModeLoaded] = useState(false);
+  // 读到已保存的模式之前禁用切换：否则较晚返回的读取会把用户刚切换并保存的值在界面上覆盖回去；
+  // 读取失败时也保持禁用并提示重试，不把未确认的默认值当成已保存的设置显示
+  const [viewportModeStatus, setViewportModeStatus] = useState<"loading" | "ready" | "failed">("loading");
+  const [viewportModeAttempt, setViewportModeAttempt] = useState(0);
 
   useEffect(() => {
     let disposed = false;
     const api = window.settings;
     if (!api) {
-      setViewportModeLoaded(true);
+      setViewportModeStatus("failed");
       return;
     }
+    setViewportModeStatus("loading");
     void api.getGeneral().then((config) => {
       if (disposed) return;
       setViewportMode(normalizeBrowserViewportMode((config as { browserViewportMode?: unknown } | null)?.browserViewportMode));
-      setViewportModeLoaded(true);
+      setViewportModeStatus("ready");
     }).catch(() => {
-      if (!disposed) setViewportModeLoaded(true);
+      if (!disposed) setViewportModeStatus("failed");
     });
     return () => { disposed = true; };
-  }, []);
+  }, [viewportModeAttempt]);
 
   /** 切换即保存；保存失败时回滚，避免界面与实际生效的模式不一致。 */
   async function changeViewportMode(next: BrowserViewportMode) {
@@ -83,7 +86,7 @@ export function BrowserControlSettingsPanel() {
             </div>
             <SettingsSegmented
               value={viewportMode}
-              disabled={!viewportModeLoaded}
+              disabled={viewportModeStatus !== "ready"}
               onChange={(next) => void changeViewportMode(normalizeBrowserViewportMode(next))}
               options={[
                 { label: t("settingsPage.browserControl.viewportModeAuto"), value: "auto" },
@@ -109,6 +112,15 @@ export function BrowserControlSettingsPanel() {
             </Popconfirm>
           </div>
         </Card>
+        {viewportModeStatus === "failed" && (
+          <Alert
+            className="cy-browser-control-page__status"
+            type="error"
+            showIcon
+            message={t("settingsPage.loadFailed")}
+            action={window.settings ? <Button size="small" onClick={() => setViewportModeAttempt((attempt) => attempt + 1)}>{t("settingsPage.browserControl.retry")}</Button> : undefined}
+          />
+        )}
         {viewportModeFailed && <Alert className="cy-browser-control-page__status" type="error" showIcon message={t("settingsPage.saveFailed")} />}
         {status === "cleared" && <Alert className="cy-browser-control-page__status" type="success" showIcon message={t("settingsPage.browserControl.cookiesCleared")} />}
         {status === "failed" && <Alert className="cy-browser-control-page__status" type="error" showIcon message={t("settingsPage.browserControl.clearCookiesFailed")} />}

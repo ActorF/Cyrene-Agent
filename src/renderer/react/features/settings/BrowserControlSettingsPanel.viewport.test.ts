@@ -92,6 +92,33 @@ describe("浏览器设置：网页显示模式", () => {
     expect(selected(host)).toBe("自动");
   });
 
+  it("读取失败时保持禁用并提示重试，不把默认值当成已保存设置；重试成功后显示真实值", async () => {
+    let attempt = 0;
+    const saveGeneral = vi.fn(async (patch: unknown) => patch);
+    (window as unknown as { settings: unknown }).settings = {
+      getGeneral: vi.fn(async () => {
+        attempt += 1;
+        if (attempt === 1) throw new Error("ipc reset");
+        return { browserViewportMode: "custom" };
+      }),
+      saveGeneral,
+    };
+    const host = await renderPanel();
+
+    expect(host.querySelectorAll(".ant-segmented-item-disabled").length).toBe(2);
+    expect(host.textContent).toContain("设置读取失败");
+    await choose(host, "自定义");
+    expect(saveGeneral).not.toHaveBeenCalled();
+
+    const retry = Array.from(host.querySelectorAll("button")).find((button) => button.textContent?.replace(/\s/g, "") === "重试");
+    expect(retry).toBeDefined();
+    await act(async () => { retry!.click(); });
+    await act(async () => { await Promise.resolve(); });
+    expect(selected(host)).toBe("自定义");
+    expect(host.querySelectorAll(".ant-segmented-item-disabled").length).toBe(0);
+    expect(host.textContent).not.toContain("设置读取失败");
+  });
+
   it("保存失败时回滚并提示", async () => {
     installSettings("auto", vi.fn(async () => { throw new Error("disk full"); }));
     const host = await renderPanel();
