@@ -27,8 +27,8 @@ import {
   focusedElementIsEditable,
   isEditingKeystroke,
   pageHasUserInput,
+  reloadForUserAgentIfIdle,
   responseVariesByUserAgent,
-  shouldDeferUserAgentReload,
   watchUserInput,
 } from "./user-agent-reload-guard";
 import {
@@ -73,6 +73,8 @@ interface BrowserTab {
   historyUserAgentKinds?: Map<number, BrowserUserAgentKind>;
   /** 当前文档里用户是否用键盘改动过内容（含 iframe）；文档跳转后清零。 */
   userTyped?: boolean;
+  /** 主框架跨文档导航计数，用于判断刷新前的异步探测期间是否有新导航开始。 */
+  navigationGeneration?: number;
   /** 上一次因身份切换自动刷新的「历史条目:身份」，同一条目同一身份只自动刷新一次，防止缓存命中导致反复刷新。 */
   lastUserAgentReload?: string;
 }
@@ -1251,6 +1253,7 @@ export class BrowserPanelController {
       // 请求头见 withTabUserAgent，响应来源见 onResponseStarted
       view.webContents.on("did-start-navigation", (details) => {
         if (!details.isMainFrame || details.isSameDocument) return;
+        tab.navigationGeneration = (tab.navigationGeneration ?? 0) + 1;
         tab.requestedUserAgentKind = undefined;
       });
       // 提交时记下新文档的身份：有真实请求就是请求用的身份；前进后退从缓存恢复旧文档时
@@ -1489,18 +1492,27 @@ export class BrowserPanelController {
    */
   private async reloadForUserAgentWhenIdle(tab: BrowserTab, view: WebContentsView): Promise<void> {
     const contents = view.webContents;
-    if (shouldDeferUserAgentReload({
-      controlled: this.controlLease?.tabId === tab.id,
-      picking: this.elementPickerTabId === tab.id,
-      loading: contents.isLoading(),
-    })) return;
-    if (tab.userTyped || await pageHasUserInput(contents)) return;
-    // 等待期间状态可能已变化（标签关闭、切走、用户自己导航）
-    if (this.disposed || contents.isDestroyed() || tab.view !== view || this.activeTabId !== tab.id || !this.documentNeedsUserAgentReload(tab)) return;
-    const attempt = `${contents.navigationHistory.getActiveIndex()}:${this.userAgentSwitch.kind}`;
-    if (tab.lastUserAgentReload === attempt) return;
-    tab.lastUserAgentReload = attempt;
-    contents.reload();
+    let attempt = "";
+    await reloadForUserAgentIfIdle({
+      snapshot: () => {
+        // 状态可能已变化（标签关闭、切走、视图重建）
+        if (this.disposed || contents.isDestroyed() || tab.view !== view || this.activeTabId !== tab.id) return null;
+        attempt = `${contents.navigationHistory.getActiveIndex()}:${this.userAgentSwitch.kind}`;
+        return {
+          controlled: this.controlLease?.tabId === tab.id,
+          picking: this.elementPickerTabId === tab.id,
+          loading: contents.isLoading(),
+          navigationGeneration: tab.navigationGeneration ?? 0,
+          // 同一条目同一身份只自动刷新一次，防止缓存命中导致反复刷新
+          stillNeeded: this.documentNeedsUserAgentReload(tab) && tab.lastUserAgentReload !== attempt,
+        };
+      },
+      hasUserInput: async () => tab.userTyped === true || await pageHasUserInput(contents),
+      reload: () => {
+        tab.lastUserAgentReload = attempt;
+        contents.reload();
+      },
+    });
   }
 
   private releaseOldestViewsUntilRoom(exceptTabId: string): void {

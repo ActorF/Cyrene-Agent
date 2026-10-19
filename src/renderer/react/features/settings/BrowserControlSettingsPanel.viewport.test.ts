@@ -119,6 +119,35 @@ describe("浏览器设置：网页显示模式", () => {
     expect(host.textContent).not.toContain("设置读取失败");
   });
 
+  it("保存进行中禁用切换；失败时回滚到最后一次确认保存的值", async () => {
+    const pending: Array<{ resolve: (v: unknown) => void; reject: (e: unknown) => void }> = [];
+    const saveGeneral = vi.fn(() => new Promise((resolve, reject) => { pending.push({ resolve, reject }); }));
+    installSettings("auto", saveGeneral as never);
+    const host = await renderPanel();
+
+    // auto → custom：保存未结算时控件禁用，再点「自动」不会发起第二次保存
+    await choose(host, "自定义");
+    expect(saveGeneral).toHaveBeenCalledTimes(1);
+    expect(host.querySelectorAll(".ant-segmented-item-disabled").length).toBe(2);
+    await choose(host, "自动");
+    expect(saveGeneral).toHaveBeenCalledTimes(1);
+
+    // 保存失败：回滚到确认过的 auto，而不是任何未落盘的中间值
+    await act(async () => { pending[0].reject(new Error("disk full")); });
+    await act(async () => { await Promise.resolve(); });
+    expect(selected(host)).toBe("自动");
+    expect(host.querySelectorAll(".ant-segmented-item-disabled").length).toBe(0);
+
+    // 再切 custom 并成功，随后切 auto 失败：回滚到最新确认的 custom
+    await choose(host, "自定义");
+    await act(async () => { pending[1].resolve({}); });
+    await act(async () => { await Promise.resolve(); });
+    await choose(host, "自动");
+    await act(async () => { pending[2].reject(new Error("ipc reset")); });
+    await act(async () => { await Promise.resolve(); });
+    expect(selected(host)).toBe("自定义");
+  });
+
   it("保存失败时回滚并提示", async () => {
     installSettings("auto", vi.fn(async () => { throw new Error("disk full"); }));
     const host = await renderPanel();

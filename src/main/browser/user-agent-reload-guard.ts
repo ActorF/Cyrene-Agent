@@ -109,3 +109,29 @@ export interface UserAgentReloadState {
 export function shouldDeferUserAgentReload(state: UserAgentReloadState): boolean {
   return state.controlled || state.picking || state.loading;
 }
+
+export interface UserAgentReloadSnapshot extends UserAgentReloadState {
+  /** 主框架跨文档导航的计数；探测期间有新导航开始时会变化。 */
+  navigationGeneration: number;
+  /** 当前文档仍按旧身份渲染、仍需要刷新。 */
+  stillNeeded: boolean;
+}
+
+/**
+ * 带护栏地刷新：先检查页面状态，再异步探测用户输入，探测返回后重新读取一次状态——
+ * 探测期间用户可能从地址栏 / 工具栏发起了导航，此时刷新会取消那次导航，必须放弃。
+ */
+export async function reloadForUserAgentIfIdle(options: {
+  snapshot: () => UserAgentReloadSnapshot | null;
+  hasUserInput: () => Promise<boolean>;
+  reload: () => void;
+}): Promise<boolean> {
+  const before = options.snapshot();
+  if (!before || !before.stillNeeded || shouldDeferUserAgentReload(before)) return false;
+  if (await options.hasUserInput()) return false;
+  const after = options.snapshot();
+  if (!after || !after.stillNeeded || shouldDeferUserAgentReload(after)) return false;
+  if (after.navigationGeneration !== before.navigationGeneration) return false;
+  options.reload();
+  return true;
+}

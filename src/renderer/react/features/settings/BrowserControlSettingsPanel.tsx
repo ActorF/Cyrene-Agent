@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Alert, Button, Popconfirm } from "antd";
 import { Cookie, Globe, Smartphone } from "lucide-react";
 import { useTranslation } from "../../i18n";
@@ -21,6 +21,9 @@ export function BrowserControlSettingsPanel() {
   // 读取失败时也保持禁用并提示重试，不把未确认的默认值当成已保存的设置显示
   const [viewportModeStatus, setViewportModeStatus] = useState<"loading" | "ready" | "failed">("loading");
   const [viewportModeAttempt, setViewportModeAttempt] = useState(0);
+  // 保存进行中禁用切换；失败时只回滚到最后一次确认保存（或读到）的值，而不是某次未落盘的中间值
+  const [viewportModeSaving, setViewportModeSaving] = useState(false);
+  const confirmedViewportMode = useRef<BrowserViewportMode>(DEFAULT_BROWSER_VIEWPORT_MODE);
 
   useEffect(() => {
     let disposed = false;
@@ -32,7 +35,9 @@ export function BrowserControlSettingsPanel() {
     setViewportModeStatus("loading");
     void api.getGeneral().then((config) => {
       if (disposed) return;
-      setViewportMode(normalizeBrowserViewportMode((config as { browserViewportMode?: unknown } | null)?.browserViewportMode));
+      const saved = normalizeBrowserViewportMode((config as { browserViewportMode?: unknown } | null)?.browserViewportMode);
+      confirmedViewportMode.current = saved;
+      setViewportMode(saved);
       setViewportModeStatus("ready");
     }).catch(() => {
       if (!disposed) setViewportModeStatus("failed");
@@ -42,16 +47,19 @@ export function BrowserControlSettingsPanel() {
 
   /** 切换即保存；保存失败时回滚，避免界面与实际生效的模式不一致。 */
   async function changeViewportMode(next: BrowserViewportMode) {
-    const previous = viewportMode;
-    if (next === previous) return;
+    if (viewportModeSaving || next === viewportMode) return;
     setViewportMode(next);
     setViewportModeFailed(false);
+    setViewportModeSaving(true);
     try {
       if (!window.settings) throw new Error("Settings API unavailable");
       await window.settings.saveGeneral({ browserViewportMode: next });
+      confirmedViewportMode.current = next;
     } catch {
-      setViewportMode(previous);
+      setViewportMode(confirmedViewportMode.current);
       setViewportModeFailed(true);
+    } finally {
+      setViewportModeSaving(false);
     }
   }
 
@@ -86,7 +94,7 @@ export function BrowserControlSettingsPanel() {
             </div>
             <SettingsSegmented
               value={viewportMode}
-              disabled={viewportModeStatus !== "ready"}
+              disabled={viewportModeStatus !== "ready" || viewportModeSaving}
               onChange={(next) => void changeViewportMode(normalizeBrowserViewportMode(next))}
               options={[
                 { label: t("settingsPage.browserControl.viewportModeAuto"), value: "auto" },
