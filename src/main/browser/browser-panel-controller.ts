@@ -23,7 +23,7 @@ import {
   type BrowserViewportMode,
 } from "../../shared/browser-viewport";
 import { UserAgentSwitch } from "./user-agent-switch";
-import { pageHasUserInput, shouldDeferUserAgentReload, watchUserInput } from "./user-agent-reload-guard";
+import { isEditingKeystroke, pageHasUserInput, shouldDeferUserAgentReload, watchUserInput } from "./user-agent-reload-guard";
 import {
   capturePlaywrightPageSnapshot,
   cancelPlaywrightElementPicker,
@@ -55,12 +55,16 @@ interface BrowserTab {
   unregisterExamPage?: () => void;
   view: WebContentsView | null;
   state: BrowserPanelTabState;
-  /** 视图创建时的默认（桌面）UA，切回桌面版时恢复。 */
-  desktopUserAgent?: string;
-  /** 该标签视图当前使用的身份。 */
-  userAgentKind?: BrowserUserAgentKind;
-  /** 身份已切换但页面还按旧身份渲染，激活时需要重新加载。 */
-  needsUserAgentReload?: boolean;
+  /** 当前文档实际以哪种身份加载；与当前应使用的身份不同时才需要刷新。 */
+  documentUserAgentKind?: BrowserUserAgentKind;
+  /** 进行中的主框架导航实际发出请求时用的身份；没有请求（前进后退缓存恢复）时为空。 */
+  requestedUserAgentKind?: BrowserUserAgentKind;
+  /** 每个历史记录条目加载时的身份，用于前进后退从缓存恢复旧文档时判断其身份。 */
+  historyUserAgentKinds?: Map<number, BrowserUserAgentKind>;
+  /** 当前文档里用户是否用键盘改动过内容（含 iframe）；文档跳转后清零。 */
+  userTyped?: boolean;
+  /** 上一次因身份切换自动刷新的「历史条目:身份」，同一条目同一身份只自动刷新一次，防止缓存命中导致反复刷新。 */
+  lastUserAgentReload?: string;
 }
 
 
@@ -107,6 +111,9 @@ export class BrowserPanelController {
   private getViewportMode: () => BrowserViewportMode = () => DEFAULT_BROWSER_VIEWPORT_MODE;
   /** 拖动分隔条时宽度连续变化，停下后再切换身份并刷新，避免拖动途中重载。 */
   private readonly userAgentSwitch = new UserAgentSwitch(() => this.syncUserAgents());
+  /** 浏览器会话默认（桌面）UA，切回桌面版时恢复。 */
+  private desktopUserAgent = "";
+  private sessionUserAgent = "";
   private readonly onPlaywrightSnapshotNavigation = (contents: WebContents): void => {
     resetPlaywrightPageSnapshot(contents);
   };
@@ -1038,8 +1045,6 @@ export class BrowserPanelController {
     tab.state = { ...tab.state, url: url.href, error: undefined, crashed: false };
     this.publish();
     try {
-      // 用当前身份加载；否则模式刚切换、延时同步未到时，那次同步的 reload 会打断本次导航
-      this.applyCurrentUserAgent(tab, view);
       await view.webContents.loadURL(url.href);
       return { ok: true };
     } catch {
@@ -1057,6 +1062,19 @@ export class BrowserPanelController {
       browserSession.setPermissionRequestHandler((_webContents, _permission, callback) => callback(false));
       browserSession.setPermissionCheckHandler(() => false);
       browserSession.on("will-download", (_event, item) => item.cancel());
+      // 主框架请求统一带上「当前应使用」的身份：链接、表单、前进后退、刷新、页面脚本发起的跳转
+      // 都在这里生效，不只是地址栏导航；子资源沿用该文档加载时的身份，避免同一页面里混用
+      browserSession.webRequest.onBeforeSendHeaders((details, callback) => {
+        callback({ requestHeaders: this.withTabUserAgent(details) });
+      });
+      // 主框架响应来自缓存时（前进后退、缓存命中），文档内容是当初加载时的身份，不能按本次请求头算
+      browserSession.webRequest.onResponseStarted((details) => {
+        if (details.resourceType !== "mainFrame") return;
+        const tab = this.findTabByContentsId(details.webContents?.id ?? details.webContentsId);
+        if (tab && details.fromCache) tab.requestedUserAgentKind = undefined;
+      });
+      this.desktopUserAgent = browserSession.getUserAgent();
+      this.sessionUserAgent = this.desktopUserAgent;
       this.browserSession = browserSession;
     }
     return this.browserSession;
@@ -1172,10 +1190,10 @@ export class BrowserPanelController {
     if (!isExam && this.bounds && this.bounds.width > 0) {
       this.userAgentSwitch.prime(this.getViewportMode(), Math.round(this.bounds.width));
     }
-    tab.desktopUserAgent = view.webContents.getUserAgent();
-    tab.userAgentKind = isExam ? "desktop" : this.userAgentSwitch.kind;
-    tab.needsUserAgentReload = false;
-    if (tab.userAgentKind === "mobile") view.webContents.setUserAgent(mobileUserAgent(process.versions.chrome));
+    tab.documentUserAgentKind = isExam ? "desktop" : this.userAgentSwitch.kind;
+    tab.requestedUserAgentKind = undefined;
+    tab.historyUserAgentKinds = new Map();
+    this.applySessionUserAgent();
     if (isExam) {
       const page = parseLearnExamPageRequest(tab.state.url);
       if (page?.kind === "document" && tab.examConversationId) {
@@ -1193,7 +1211,39 @@ export class BrowserPanelController {
     win.contentView.addChildView(view);
     view.setBounds({ x: 0, y: 0, width: 0, height: 0 });
     this.attachEvents(tab, view);
-    if (!isExam) view.webContents.on("dom-ready", () => watchUserInput(view.webContents));
+    if (!isExam) {
+      view.webContents.on("dom-ready", () => watchUserInput(view.webContents));
+      view.webContents.on("before-input-event", (_event, input) => {
+        if (isEditingKeystroke(input)) tab.userTyped = true;
+      });
+      // 任何入口发起的主框架跳转（链接、表单、前进后退、刷新、页面脚本）都按当前身份请求，
+      // 请求头见 withTabUserAgent，响应来源见 onResponseStarted
+      view.webContents.on("did-start-navigation", (details) => {
+        if (!details.isMainFrame || details.isSameDocument) return;
+        tab.requestedUserAgentKind = undefined;
+      });
+      // 提交时记下新文档的身份：有真实请求就是请求用的身份；前进后退从缓存恢复旧文档时
+      // 没有请求，按该历史条目当初加载时的身份。仍与当前身份不符时再走带护栏的刷新
+      view.webContents.on("did-navigate", () => {
+        if (tab.view !== view || view.webContents.isDestroyed()) return;
+        tab.userTyped = false;
+        const index = view.webContents.navigationHistory.getActiveIndex();
+        const kind = tab.requestedUserAgentKind ?? tab.historyUserAgentKinds?.get(index) ?? tab.documentUserAgentKind;
+        // 真实请求加载的新文档身份已确定，允许之后再次自动刷新
+        if (tab.requestedUserAgentKind) tab.lastUserAgentReload = undefined;
+        tab.requestedUserAgentKind = undefined;
+        if (kind) {
+          tab.documentUserAgentKind = kind;
+          tab.historyUserAgentKinds?.set(index, kind);
+        }
+      });
+      // 加载结束时再判断：前进后退从缓存恢复了旧身份的文档、或加载期间切换了身份，
+      // 都在页面加载完、不再处于加载中时带护栏补刷新一次
+      view.webContents.on("did-stop-loading", () => {
+        if (tab.view !== view || view.webContents.isDestroyed()) return;
+        if (this.activeTabId === tab.id && this.documentNeedsUserAgentReload(tab)) void this.reloadForUserAgentWhenIdle(tab, view);
+      });
+    }
     if (!this.observedWindows.has(win)) {
       this.observedWindows.add(win);
       win.once("closed", () => {
@@ -1349,39 +1399,62 @@ export class BrowserPanelController {
 
   private updateUserAgentKind(width: number): void {
     this.userAgentSwitch.update(this.getViewportMode(), width);
+    this.applySessionUserAgent();
   }
 
-  /** 把当前身份应用到标签（只影响之后的加载）；即将导航的标签不再需要补刷新。 */
-  private applyCurrentUserAgent(tab: BrowserTab, view: WebContentsView): void {
-    tab.needsUserAgentReload = false;
-    const kind = this.userAgentSwitch.kind;
-    if (tab.kind === "exam" || tab.userAgentKind === kind) return;
-    view.webContents.setUserAgent(kind === "mobile"
-      ? mobileUserAgent(process.versions.chrome)
-      : tab.desktopUserAgent ?? view.webContents.getUserAgent());
-    tab.userAgentKind = kind;
+  /**
+   * 身份设在浏览器会话上，而不是逐个 webContents.setUserAgent：
+   * 后者在页面加载中调用时 Chromium 会重新加载当前条目，打断正在进行的导航。
+   * 会话 UA 只影响之后的请求与新文档，切换本身不会刷新任何页面；刷新只走带护栏的 reloadForUserAgentWhenIdle。
+   */
+  private applySessionUserAgent(): void {
+    if (!this.browserSession || !this.desktopUserAgent) return;
+    const userAgent = this.userAgentSwitch.kind === "mobile" ? mobileUserAgent(process.versions.chrome) : this.desktopUserAgent;
+    if (userAgent === this.sessionUserAgent) return;
+    this.browserSession.setUserAgent(userAgent);
+    this.sessionUserAgent = userAgent;
+  }
+
+  private findTabByContentsId(contentsId: number | undefined): BrowserTab | undefined {
+    if (contentsId === undefined) return undefined;
+    return this.tabs.find((candidate) => candidate.view && !candidate.view.webContents.isDestroyed() && candidate.view.webContents.id === contentsId);
+  }
+
+  private withTabUserAgent(details: Electron.OnBeforeSendHeadersListenerDetails): Record<string, string> {
+    const headers = details.requestHeaders;
+    const tab = this.findTabByContentsId(details.webContents?.id ?? details.webContentsId);
+    if (!tab || tab.kind === "exam") return headers;
+    let kind: BrowserUserAgentKind;
+    if (details.resourceType === "mainFrame") {
+      kind = this.userAgentSwitch.kind;
+      tab.requestedUserAgentKind = kind;
+    } else {
+      kind = tab.documentUserAgentKind ?? "desktop";
+    }
+    const userAgent = kind === "mobile" ? mobileUserAgent(process.versions.chrome) : this.desktopUserAgent;
+    if (!userAgent) return headers;
+    const key = Object.keys(headers).find((name) => name.toLowerCase() === "user-agent") ?? "User-Agent";
+    return { ...headers, [key]: userAgent };
+  }
+
+  /** 当前文档按旧身份加载，需要刷新才能拿到对应版式。 */
+  private documentNeedsUserAgentReload(tab: BrowserTab): boolean {
+    return tab.kind !== "exam" && !!tab.state.url && tab.documentUserAgentKind !== this.userAgentSwitch.kind;
   }
 
   private syncUserAgents(): void {
     if (this.disposed) return;
-    for (const tab of this.tabs) {
-      const view = tab.view;
-      if (!view || view.webContents.isDestroyed() || tab.kind === "exam") continue;
-      if (tab.userAgentKind === this.userAgentSwitch.kind) continue;
-      this.applyCurrentUserAgent(tab, view);
-      tab.needsUserAgentReload = !!tab.state.url;
-    }
+    this.applySessionUserAgent();
     // 只刷新当前可见的标签；后台标签在切过去时再刷新
     const active = this.getActiveTab();
-    if (active?.needsUserAgentReload && active.view && !active.view.webContents.isDestroyed()) {
+    if (active?.view && !active.view.webContents.isDestroyed() && this.documentNeedsUserAgentReload(active)) {
       void this.reloadForUserAgentWhenIdle(active, active.view);
     }
   }
 
   /**
-   * 页面正被使用（Agent 控制中、元素选择中、仍在加载、用户输入过内容）时不刷新，
-   * 保留 needsUserAgentReload：下一次宽度变化或切换标签触发的同步会再判断；
-   * 用户自己导航时 navigateTab 会直接按新身份加载并清除该标记。
+   * 页面正被使用（Agent 控制中、元素选择中、仍在加载、用户输入过内容）时不刷新：
+   * 下一次宽度变化或切换标签触发的同步会再判断；用户自己导航时新文档直接按新身份加载。
    */
   private async reloadForUserAgentWhenIdle(tab: BrowserTab, view: WebContentsView): Promise<void> {
     const contents = view.webContents;
@@ -1390,10 +1463,12 @@ export class BrowserPanelController {
       picking: this.elementPickerTabId === tab.id,
       loading: contents.isLoading(),
     })) return;
-    if (await pageHasUserInput(contents)) return;
+    if (tab.userTyped || await pageHasUserInput(contents)) return;
     // 等待期间状态可能已变化（标签关闭、切走、用户自己导航）
-    if (this.disposed || contents.isDestroyed() || tab.view !== view || this.activeTabId !== tab.id || !tab.needsUserAgentReload) return;
-    tab.needsUserAgentReload = false;
+    if (this.disposed || contents.isDestroyed() || tab.view !== view || this.activeTabId !== tab.id || !this.documentNeedsUserAgentReload(tab)) return;
+    const attempt = `${contents.navigationHistory.getActiveIndex()}:${this.userAgentSwitch.kind}`;
+    if (tab.lastUserAgentReload === attempt) return;
+    tab.lastUserAgentReload = attempt;
     contents.reload();
   }
 

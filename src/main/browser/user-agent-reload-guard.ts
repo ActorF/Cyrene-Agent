@@ -36,6 +36,28 @@ export async function pageHasUserInput(contents: WebContents): Promise<boolean> 
   return Promise.race([probe, timeout]);
 }
 
+/** WebContents 的 before-input-event 输入（只用到其中几个字段）。 */
+export interface KeyboardInputLike {
+  type: string;
+  key: string;
+  control?: boolean;
+  meta?: boolean;
+  alt?: boolean;
+}
+
+/**
+ * 是否是会改动页面内容的按键。before-input-event 覆盖页面内所有 frame（含 iframe 里的表单），
+ * 而 DOM 的 input 事件不会跨 frame 冒泡，因此键盘编辑用它来记录。
+ * 方向键、Tab、翻页、复制等不改内容的按键不算。
+ */
+export function isEditingKeystroke(input: KeyboardInputLike): boolean {
+  if (input.type !== "keyDown") return false;
+  const key = input.key;
+  if (input.control || input.meta) return /^[vx]$/i.test(key);
+  if (input.alt) return false;
+  return key.length === 1 || key === "Backspace" || key === "Delete" || key === "Enter";
+}
+
 export interface UserAgentReloadState {
   /** Agent 浏览器控制正持有该标签。 */
   controlled: boolean;
