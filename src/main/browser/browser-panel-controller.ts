@@ -19,10 +19,10 @@ import { navigationErrorCode, parseHttpUrl } from "./http-url";
 import {
   DEFAULT_BROWSER_VIEWPORT_MODE,
   mobileUserAgent,
-  resolveUserAgentKind,
   type BrowserUserAgentKind,
   type BrowserViewportMode,
 } from "../../shared/browser-viewport";
+import { UserAgentSwitch } from "./user-agent-switch";
 import {
   capturePlaywrightPageSnapshot,
   cancelPlaywrightElementPicker,
@@ -62,8 +62,6 @@ interface BrowserTab {
   needsUserAgentReload?: boolean;
 }
 
-/** 拖动分隔条时宽度连续变化，停下后再切换身份并刷新，避免反复重载。 */
-const USER_AGENT_SWITCH_DELAY_MS = 300;
 
 interface BrowserObservationRecord {
   tabId: string;
@@ -106,8 +104,8 @@ export class BrowserPanelController {
   private controlActionTimer: ReturnType<typeof setTimeout> | null = null;
   private readonly observedWindows = new WeakSet<BrowserWindow>();
   private getViewportMode: () => BrowserViewportMode = () => DEFAULT_BROWSER_VIEWPORT_MODE;
-  private userAgentKind: BrowserUserAgentKind = "desktop";
-  private userAgentSwitchTimer: ReturnType<typeof setTimeout> | null = null;
+  /** 拖动分隔条时宽度连续变化，停下后再切换身份并刷新，避免拖动途中重载。 */
+  private readonly userAgentSwitch = new UserAgentSwitch(() => this.syncUserAgents());
   private readonly onPlaywrightSnapshotNavigation = (contents: WebContents): void => {
     resetPlaywrightPageSnapshot(contents);
   };
@@ -975,8 +973,7 @@ export class BrowserPanelController {
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
-    if (this.userAgentSwitchTimer) clearTimeout(this.userAgentSwitchTimer);
-    this.userAgentSwitchTimer = null;
+    this.userAgentSwitch.dispose();
     this.controlLease = null;
     if (this.controlActionTimer) clearTimeout(this.controlActionTimer);
     this.controlActionTimer = null;
@@ -1170,7 +1167,7 @@ export class BrowserPanelController {
     tab.view = view;
     // 新视图按当前身份创建，随后的 loadURL 直接拿到对应版式；考试页是应用内页面，不切换身份
     tab.desktopUserAgent = view.webContents.getUserAgent();
-    tab.userAgentKind = isExam ? "desktop" : this.userAgentKind;
+    tab.userAgentKind = isExam ? "desktop" : this.userAgentSwitch.kind;
     tab.needsUserAgentReload = false;
     if (tab.userAgentKind === "mobile") view.webContents.setUserAgent(mobileUserAgent(process.versions.chrome));
     if (isExam) {
@@ -1344,28 +1341,18 @@ export class BrowserPanelController {
   }
 
   private updateUserAgentKind(width: number): void {
-    const next = resolveUserAgentKind(this.getViewportMode(), width, this.userAgentKind);
-    if (next !== this.userAgentKind) {
-      this.userAgentKind = next;
-      if (this.userAgentSwitchTimer) clearTimeout(this.userAgentSwitchTimer);
-      this.userAgentSwitchTimer = setTimeout(() => {
-        this.userAgentSwitchTimer = null;
-        this.syncUserAgents();
-      }, USER_AGENT_SWITCH_DELAY_MS);
-    } else if (!this.userAgentSwitchTimer) {
-      // 身份未变时也检查一次：切到之前在后台、还按旧身份渲染的标签时补刷新
-      this.syncUserAgents();
-    }
+    this.userAgentSwitch.update(this.getViewportMode(), width);
   }
 
   /** 把当前身份应用到标签（只影响之后的加载）；即将导航的标签不再需要补刷新。 */
   private applyCurrentUserAgent(tab: BrowserTab, view: WebContentsView): void {
     tab.needsUserAgentReload = false;
-    if (tab.kind === "exam" || tab.userAgentKind === this.userAgentKind) return;
-    view.webContents.setUserAgent(this.userAgentKind === "mobile"
+    const kind = this.userAgentSwitch.kind;
+    if (tab.kind === "exam" || tab.userAgentKind === kind) return;
+    view.webContents.setUserAgent(kind === "mobile"
       ? mobileUserAgent(process.versions.chrome)
       : tab.desktopUserAgent ?? view.webContents.getUserAgent());
-    tab.userAgentKind = this.userAgentKind;
+    tab.userAgentKind = kind;
   }
 
   private syncUserAgents(): void {
@@ -1373,7 +1360,7 @@ export class BrowserPanelController {
     for (const tab of this.tabs) {
       const view = tab.view;
       if (!view || view.webContents.isDestroyed() || tab.kind === "exam") continue;
-      if (tab.userAgentKind === this.userAgentKind) continue;
+      if (tab.userAgentKind === this.userAgentSwitch.kind) continue;
       this.applyCurrentUserAgent(tab, view);
       tab.needsUserAgentReload = !!tab.state.url;
     }
