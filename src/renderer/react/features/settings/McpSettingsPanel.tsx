@@ -17,7 +17,7 @@ interface McpFormState {
   name: string;
   transport: McpTransport;
   command: string;   // stdio：启动命令
-  args: string;      // stdio：参数（空格分隔）
+  args: string;      // stdio：参数（空格分隔或 JSON 数组）
   url: string;       // 远程：服务地址
   env: string;       // stdio：环境变量 JSON 文本
   headers: string;   // 远程：请求头 JSON 文本
@@ -27,8 +27,47 @@ const MCP_FORM_DEFAULTS: McpFormState = {
   name: "", transport: "stdio", command: "", args: "", url: "", env: "", headers: "",
 };
 
-function splitArgs(text: string): string[] {
-  return text.trim().split(/\s+/).filter(Boolean);
+class McpArgsError extends Error {}
+const MCP_ARG_CONTROL_CHARS = /[\u0000-\u001f]/;
+
+function validateArgs(value: unknown): string[] {
+  // 两种输入模式共用校验；沿用数字/布尔参数的字符串转换，避免破坏已有配置。
+  if (Array.isArray(value) && value.every((arg) =>
+    typeof arg === "number" || typeof arg === "boolean"
+    || (typeof arg === "string" && !MCP_ARG_CONTROL_CHARS.test(arg))
+  )) return value.map(String);
+  throw new McpArgsError("Expected a JSON array of strings, numbers or booleans without control characters");
+}
+
+function normalizeDraftArgs(args: unknown[]): unknown[] {
+  // 1e400 等 JSON 数字会解析为 Infinity；先沿用字符串转换，避免再序列化时变成 null。
+  return args.map((arg) => typeof arg === "number" && !Number.isFinite(arg) ? String(arg) : arg);
+}
+
+function splitArgs(text: string): unknown[] {
+  const trimmed = text.trim();
+  if (!trimmed.startsWith("[")) return trimmed.split(/\s+/).filter(Boolean);
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(trimmed);
+  } catch {
+    // 参数数组写错时不能退回空格拆分，否则会把损坏的参数传给进程。
+    throw new McpArgsError("Invalid JSON argument array");
+  }
+  if (!Array.isArray(parsed)) throw new McpArgsError("Expected a JSON argument array");
+  return normalizeDraftArgs(parsed);
+}
+
+function formatArgs(args: unknown[]): string {
+  // 保留草稿原始类型，避免对象或 null 被字符串化后绕过添加时的校验。
+  const draftArgs = normalizeDraftArgs(args);
+  if (draftArgs.some((arg) => typeof arg !== "string")) return JSON.stringify(draftArgs);
+  const values = draftArgs.map(String);
+  const plain = values.join(" ");
+  // 保留 argv 边界；控制字符也留在 JSON 中，避免绕过数组校验。
+  return plain.startsWith("[") || values.some((arg) => arg === "" || /\s/.test(arg) || MCP_ARG_CONTROL_CHARS.test(arg))
+    ? JSON.stringify(values)
+    : plain;
 }
 
 /** 解析 JSON 对象文本（环境变量/请求头）。空文本返回空对象；格式错误抛异常。 */
@@ -89,7 +128,7 @@ export function entryToConfig(name: string, entry: Record<string, unknown>, exis
   const config: McpServerConfigView = { id: deriveServerId(name, existingIds), name, transport };
   if (transport === "stdio") {
     if (typeof entry.command === "string" && entry.command.trim()) config.command = entry.command.trim();
-    if (Array.isArray(entry.args)) config.args = entry.args.map((v) => String(v)).filter(Boolean);
+    if (entry.args !== undefined) config.args = validateArgs(entry.args);
     const env = toOptionalRecord(entry.env);
     if (env) config.env = env;
   } else {
@@ -113,7 +152,7 @@ export function parseJsonServers(text: string): Array<{ name: string; entry: Rec
     .map(([name, value]) => ({ name, entry: value as Record<string, unknown> }));
 }
 
-/** 表单状态 → JSON 条目（用于表单→JSON 模式同步）。环境变量/请求头格式有误时抛异常。 */
+/** 表单状态 → JSON 草稿；只解析可转换的结构，参数有效性在添加时检查。 */
 export function formToEntry(form: McpFormState): Record<string, unknown> {
   const entry: Record<string, unknown> = {};
   if (form.transport === "stdio") {
@@ -137,7 +176,8 @@ export function entryToFormPatch(name: string, entry: Record<string, unknown>): 
   const patch: Partial<McpFormState> = { name, transport };
   if (transport === "stdio") {
     patch.command = typeof entry.command === "string" ? entry.command : "";
-    patch.args = Array.isArray(entry.args) ? entry.args.map(String).join(" ") : "";
+    if (entry.args !== undefined && !Array.isArray(entry.args)) throw new McpArgsError("Expected a JSON argument array");
+    patch.args = Array.isArray(entry.args) ? formatArgs(entry.args) : "";
     patch.env = toOptionalRecord(entry.env) ? JSON.stringify(entry.env, null, 2) : "";
   } else {
     patch.url = typeof entry.url === "string" ? entry.url : "";
@@ -159,6 +199,7 @@ function AddMcpServerModal({ open, initialForm, existingIds, onClose, onAdded }:
   const [mode, setMode] = useState<"form" | "json">("form");
   const [form, setForm] = useState<McpFormState>(MCP_FORM_DEFAULTS);
   const [jsonText, setJsonText] = useState("");
+  const [unsyncedSource, setUnsyncedSource] = useState<"form" | "json" | null>(null);
   const [error, setError] = useState("");
   const [adding, setAdding] = useState(false);
 
@@ -167,6 +208,7 @@ function AddMcpServerModal({ open, initialForm, existingIds, onClose, onAdded }:
     if (open) {
       setForm({ ...MCP_FORM_DEFAULTS, ...initialForm });
       setJsonText("");
+      setUnsyncedSource(null);
       setError("");
       setMode("form");
     }
@@ -176,12 +218,18 @@ function AddMcpServerModal({ open, initialForm, existingIds, onClose, onAdded }:
 
   function updateForm(patch: Partial<McpFormState>) {
     setForm((current) => ({ ...current, ...patch }));
+    setUnsyncedSource(null);
     setError("");
   }
 
   function switchMode(next: "form" | "json") {
     if (next === mode) return;
     setError("");
+    // 无法转换时保留两边草稿，返回原编辑器不能被另一边的旧内容覆盖。
+    if (next === unsyncedSource) {
+      setMode(next);
+      return;
+    }
     if (next === "json") {
       // 表单 → JSON：把当前表单序列化成 mcpServers 草稿；内容为空时不覆盖
       const hasContent = form.name.trim() || form.command.trim() || form.url.trim();
@@ -189,20 +237,29 @@ function AddMcpServerModal({ open, initialForm, existingIds, onClose, onAdded }:
         try {
           const draft = { mcpServers: { [form.name.trim() || "server-name"]: formToEntry(form) } };
           setJsonText(JSON.stringify(draft, null, 2));
+          setUnsyncedSource(null);
         } catch {
-          // 环境变量/请求头 JSON 格式有误时保留原文本，由 JSON 模式自行提示
+          setUnsyncedSource("form");
         }
+      } else if (jsonText.trim()) {
+        setUnsyncedSource("form");
       }
     } else if (jsonText.trim()) {
       // JSON → 表单：解析成功时把第一个服务器填回表单；失败则保留表单现状
       try {
         const servers = parseJsonServers(jsonText);
         if (servers.length > 0) {
-          setForm((current) => ({ ...current, ...entryToFormPatch(servers[0].name, servers[0].entry) }));
+          const patch = entryToFormPatch(servers[0].name, servers[0].entry);
+          setForm((current) => ({ ...current, ...patch }));
+          setUnsyncedSource(null);
+        } else {
+          setUnsyncedSource("json");
         }
       } catch {
-        // 保留表单现状
+        setUnsyncedSource("json");
       }
+    } else {
+      setUnsyncedSource("json");
     }
     setMode(next);
   }
@@ -211,6 +268,9 @@ function AddMcpServerModal({ open, initialForm, existingIds, onClose, onAdded }:
     const api = window.settings;
     if (!api?.addMcpServer) return;
     setError("");
+    // 只在添加时校验；未同步的原稿仍是准确信息，不能提交旧目标草稿。
+    const submitMode = unsyncedSource ?? mode;
+    if (submitMode !== mode) setMode(submitMode);
 
     // 本地校验 + 组装配置（多服务器时 id 依次去重）
     const configs: McpServerConfigView[] = [];
@@ -219,7 +279,7 @@ function AddMcpServerModal({ open, initialForm, existingIds, onClose, onAdded }:
       configs.push(entryToConfig(name, entry, taken));
     };
     try {
-      if (mode === "form") {
+      if (submitMode === "form") {
         const name = form.name.trim();
         if (!name) throw new Error(t("settingsPage.mcp.nameRequired"));
         if (form.transport === "stdio") {
@@ -268,7 +328,9 @@ function AddMcpServerModal({ open, initialForm, existingIds, onClose, onAdded }:
         }
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(err instanceof McpArgsError
+        ? t("settingsPage.mcp.argsInvalid")
+        : err instanceof Error ? err.message : String(err));
       return;
     }
 
@@ -367,7 +429,7 @@ function AddMcpServerModal({ open, initialForm, existingIds, onClose, onAdded }:
       </> : (
         <div className="cy-settings-mcp-modal__field">
           <label htmlFor="cy-mcp-json">{t("settingsPage.mcp.jsonLabel")}</label>
-          <Input.TextArea id="cy-mcp-json" rows={12} value={jsonText} placeholder={t("settingsPage.mcp.jsonPlaceholder")} onChange={(event) => { setJsonText(event.target.value); setError(""); }} spellCheck={false} />
+          <Input.TextArea id="cy-mcp-json" rows={12} value={jsonText} placeholder={t("settingsPage.mcp.jsonPlaceholder")} onChange={(event) => { setJsonText(event.target.value); setUnsyncedSource(null); setError(""); }} spellCheck={false} />
         </div>
       )}
       {error && <Alert type="error" showIcon message={error} />}
