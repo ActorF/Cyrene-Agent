@@ -5,7 +5,7 @@ import { MINIMAX_REGISTRY } from "./entries/minimax";
 describe("内置静态型号目录", () => {
   it("保持推荐顺序，并保留运行默认与候选首项的区别", () => {
     expect(getBuiltinModels("minimax", "chat")).toEqual([
-      "MiniMax-M3.1-Flash-Preview", "MiniMax-M3", "MiniMax-M2.7", "MiniMax-M2.5",
+      "MiniMax-M3.1-Flash", "MiniMax-M3", "MiniMax-M2.7", "MiniMax-M2.5",
     ]);
     expect(MINIMAX_REGISTRY.capability.defaultModel).toBe("MiniMax-M3");
     expect(MINIMAX_REGISTRY.capability.baseUrl).toBe("https://api.minimaxi.com/anthropic");
