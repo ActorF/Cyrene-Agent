@@ -23,6 +23,7 @@ import {
   type BrowserViewportMode,
 } from "../../shared/browser-viewport";
 import { UserAgentSwitch } from "./user-agent-switch";
+import { pageHasUserInput, shouldDeferUserAgentReload, watchUserInput } from "./user-agent-reload-guard";
 import {
   capturePlaywrightPageSnapshot,
   cancelPlaywrightElementPicker,
@@ -1165,7 +1166,12 @@ export class BrowserPanelController {
       },
     });
     tab.view = view;
-    // 新视图按当前身份创建，随后的 loadURL 直接拿到对应版式；考试页是应用内页面，不切换身份
+    // 新视图按当前身份创建，随后的 loadURL 直接拿到对应版式；考试页是应用内页面，不切换身份。
+    // 已知面板宽度时先据此确定身份：恢复会话 / 首次打开时视图早于 applyBounds 创建，
+    // 否则会先以桌面版加载、300ms 后再切换并重载
+    if (!isExam && this.bounds && this.bounds.width > 0) {
+      this.userAgentSwitch.prime(this.getViewportMode(), Math.round(this.bounds.width));
+    }
     tab.desktopUserAgent = view.webContents.getUserAgent();
     tab.userAgentKind = isExam ? "desktop" : this.userAgentSwitch.kind;
     tab.needsUserAgentReload = false;
@@ -1187,6 +1193,7 @@ export class BrowserPanelController {
     win.contentView.addChildView(view);
     view.setBounds({ x: 0, y: 0, width: 0, height: 0 });
     this.attachEvents(tab, view);
+    if (!isExam) view.webContents.on("dom-ready", () => watchUserInput(view.webContents));
     if (!this.observedWindows.has(win)) {
       this.observedWindows.add(win);
       win.once("closed", () => {
@@ -1367,9 +1374,27 @@ export class BrowserPanelController {
     // 只刷新当前可见的标签；后台标签在切过去时再刷新
     const active = this.getActiveTab();
     if (active?.needsUserAgentReload && active.view && !active.view.webContents.isDestroyed()) {
-      active.needsUserAgentReload = false;
-      active.view.webContents.reload();
+      void this.reloadForUserAgentWhenIdle(active, active.view);
     }
+  }
+
+  /**
+   * 页面正被使用（Agent 控制中、元素选择中、仍在加载、用户输入过内容）时不刷新，
+   * 保留 needsUserAgentReload：下一次宽度变化或切换标签触发的同步会再判断；
+   * 用户自己导航时 navigateTab 会直接按新身份加载并清除该标记。
+   */
+  private async reloadForUserAgentWhenIdle(tab: BrowserTab, view: WebContentsView): Promise<void> {
+    const contents = view.webContents;
+    if (shouldDeferUserAgentReload({
+      controlled: this.controlLease?.tabId === tab.id,
+      picking: this.elementPickerTabId === tab.id,
+      loading: contents.isLoading(),
+    })) return;
+    if (await pageHasUserInput(contents)) return;
+    // 等待期间状态可能已变化（标签关闭、切走、用户自己导航）
+    if (this.disposed || contents.isDestroyed() || tab.view !== view || this.activeTabId !== tab.id || !tab.needsUserAgentReload) return;
+    tab.needsUserAgentReload = false;
+    contents.reload();
   }
 
   private releaseOldestViewsUntilRoom(exceptTabId: string): void {

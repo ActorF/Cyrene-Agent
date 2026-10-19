@@ -80,3 +80,22 @@ describe("视口身份切换时机", () => {
     expect(onSettled).not.toHaveBeenCalled();
   });
 });
+
+describe("创建视图前按已知宽度确定身份", () => {
+  it("prime 直接确定身份且不触发同步；随后同宽度上报立即同步（无重复切换）", () => {
+    const onSettled = vi.fn();
+    const sw = new UserAgentSwitch(onSettled);
+    sw.prime("auto", 374);
+    expect(sw.kind).toBe("mobile");
+    expect(onSettled).not.toHaveBeenCalled();
+    sw.update("auto", 374);
+    expect(sw.kind).toBe("mobile");
+    expect(onSettled).toHaveBeenCalledTimes(1);
+  });
+
+  it("custom 模式 prime 仍为桌面版", () => {
+    const sw = new UserAgentSwitch(vi.fn());
+    sw.prime("custom", 374);
+    expect(sw.kind).toBe("desktop");
+  });
+});

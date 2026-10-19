@@ -17,13 +17,23 @@ export function BrowserControlSettingsPanel() {
   const [status, setStatus] = useState<"cleared" | "failed" | "">("");
   const [viewportMode, setViewportMode] = useState<BrowserViewportMode>(DEFAULT_BROWSER_VIEWPORT_MODE);
   const [viewportModeFailed, setViewportModeFailed] = useState(false);
+  // 读到已保存的模式之前禁用切换：否则较晚返回的读取会把用户刚切换并保存的值在界面上覆盖回去
+  const [viewportModeLoaded, setViewportModeLoaded] = useState(false);
 
   useEffect(() => {
     let disposed = false;
-    void window.settings?.getGeneral().then((config) => {
+    const api = window.settings;
+    if (!api) {
+      setViewportModeLoaded(true);
+      return;
+    }
+    void api.getGeneral().then((config) => {
       if (disposed) return;
       setViewportMode(normalizeBrowserViewportMode((config as { browserViewportMode?: unknown } | null)?.browserViewportMode));
-    }).catch(() => {});
+      setViewportModeLoaded(true);
+    }).catch(() => {
+      if (!disposed) setViewportModeLoaded(true);
+    });
     return () => { disposed = true; };
   }, []);
 
@@ -73,6 +83,7 @@ export function BrowserControlSettingsPanel() {
             </div>
             <SettingsSegmented
               value={viewportMode}
+              disabled={!viewportModeLoaded}
               onChange={(next) => void changeViewportMode(normalizeBrowserViewportMode(next))}
               options={[
                 { label: t("settingsPage.browserControl.viewportModeAuto"), value: "auto" },

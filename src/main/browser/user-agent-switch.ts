@@ -38,6 +38,15 @@ export class UserAgentSwitch {
     }
   }
 
+  /**
+   * 创建视图前按已知宽度直接确定身份，不计时：此时还没有按旧身份渲染的页面需要同步，
+   * 新视图应直接以正确身份首次加载。
+   */
+  prime(mode: BrowserViewportMode, width: number): void {
+    this.lastWidth = width;
+    this.current = resolveUserAgentKind(mode, width, this.current);
+  }
+
   dispose(): void {
     if (this.timer) clearTimeout(this.timer);
     this.timer = null;

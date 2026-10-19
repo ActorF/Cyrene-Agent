@@ -68,6 +68,30 @@ describe("浏览器设置：网页显示模式", () => {
     expect(host.textContent).toContain("始终以桌面版访问网页");
   });
 
+  it("读到已保存的模式之前禁用切换，迟到的读取不会覆盖用户的选择", async () => {
+    let resolveGeneral!: (value: unknown) => void;
+    const saveGeneral = vi.fn(async (patch: unknown) => patch);
+    (window as unknown as { settings: unknown }).settings = {
+      getGeneral: vi.fn(() => new Promise((resolve) => { resolveGeneral = resolve; })),
+      saveGeneral,
+    };
+    const host = await renderPanel();
+
+    // 读取未返回：控件禁用，点击不会保存
+    expect(host.querySelectorAll(".ant-segmented-item-disabled").length).toBe(2);
+    await choose(host, "自定义");
+    expect(saveGeneral).not.toHaveBeenCalled();
+
+    // 读取返回已保存的 custom 后才可切换
+    await act(async () => { resolveGeneral({ browserViewportMode: "custom" }); });
+    await act(async () => { await Promise.resolve(); });
+    expect(selected(host)).toBe("自定义");
+    expect(host.querySelectorAll(".ant-segmented-item-disabled").length).toBe(0);
+    await choose(host, "自动");
+    expect(saveGeneral).toHaveBeenCalledWith({ browserViewportMode: "auto" });
+    expect(selected(host)).toBe("自动");
+  });
+
   it("保存失败时回滚并提示", async () => {
     installSettings("auto", vi.fn(async () => { throw new Error("disk full"); }));
     const host = await renderPanel();
