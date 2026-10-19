@@ -285,6 +285,8 @@ interface SessionActiveRun {
 }
 
 const sessionActiveRuns = new Map<string, SessionActiveRun>();
+// 失败不代表结果失效；进程内保留来源，直到后续成功消费或会话变更。
+const retainedCompletionRuns = new Map<string, Set<SessionActiveRun>>();
 const pendingCompletionRetirements = new Map<string, Set<SessionActiveRun>>();
 
 function queueCompletionRetirement(sessionId: string, run: SessionActiveRun): Set<SessionActiveRun> {
@@ -322,20 +324,20 @@ async function retryCompletionRetirements(sessionId: string, bounded = true): Pr
 
 async function settleRunCompletions(sessionId: string, runId: string, succeeded: boolean): Promise<void> {
   const run = sessionActiveRuns.get(sessionId);
-  // 会话变更已接管退休的运行，须先释放守卫，再由等待 settled 的调用方处理。
-  if (succeeded || run?.runId !== runId || !run.completions.size
-    || pendingCompletionRetirements.get(sessionId)?.has(run)) return;
-  try {
-    // 此处不能等待自身 settled；退休完成后才释放会话守卫。
-    await retireRunCompletions(sessionId, run);
-  } catch (error) {
-    console.warn("[AgUiBridge] Shell 事件退休失败:", error);
-  }
+  if (run?.runId !== runId) return;
+  if (succeeded) { retainedCompletionRuns.delete(sessionId); return; }
+  // 会话变更已接管退休；不能在生命周期中等待自己的 settled。
+  if (!run.completions.size || pendingCompletionRetirements.get(sessionId)?.has(run)) return;
+  let retained = retainedCompletionRuns.get(sessionId);
+  if (!retained) retainedCompletionRuns.set(sessionId, retained = new Set());
+  retained.add(run);
 }
 
 /** 会话变更或删除前停止后台续轮，结算完成前不得修改会话。 */
 export async function cancelBackgroundConversationRun(sessionId: string, suppressWake = true): Promise<void> {
   if (suppressWake) shellCompletions?.suppressWake(sessionId);
+  for (const retained of retainedCompletionRuns.get(sessionId) ?? []) queueCompletionRetirement(sessionId, retained);
+  retainedCompletionRuns.delete(sessionId);
   const run = sessionActiveRuns.get(sessionId);
   if (run?.background) {
     queueCompletionRetirement(sessionId, run);
@@ -349,7 +351,10 @@ export async function cancelBackgroundConversationRun(sessionId: string, suppres
 export async function prepareBackgroundSessionMutation(sessionId: string): Promise<(committed?: boolean) => void> {
   const finish = shellCompletions?.suspendWake(sessionId) ?? (() => {});
   try { await cancelBackgroundConversationRun(sessionId, false); }
-  catch (error) { finish(false); throw error; }
+  catch (error) {
+    finish(false);
+    throw new Error(`SHELL_COMPLETION_SETTLEMENT_PENDING: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
+  }
   return finish;
 }
 
@@ -477,6 +482,19 @@ export function registerAgUiIpc(
     const entries = await transcriptStore.readShellCompletionEntries(completion.conversationId, true);
     if (entries.some(entry => entry.kind === "background_event_retired" && entry.payload.jobId === completion.snapshot.jobId)) return false;
     return !isTranscriptRunSuperseded(entries, completion.sourceRunId, completion.sourceToolCallId);
+  };
+  const validateRetainedCompletions = async (sessionId: string) => {
+    const retained = retainedCompletionRuns.get(sessionId);
+    if (!retained) return;
+    for (const run of retained) {
+      for (const [jobId, completion] of run.completions) {
+        if (await canDeliverCompletion(completion)) continue;
+        await retireCompletion(completion);
+        run.completions.delete(jobId);
+      }
+      if (!run.completions.size) retained.delete(run);
+    }
+    if (!retained.size) retainedCompletionRuns.delete(sessionId);
   };
   const inbox = new ShellCompletionDispatcher({
     append: async (completion, message) => {
@@ -712,6 +730,7 @@ export function registerAgUiIpc(
     let modelContext: MaterializedTranscript | undefined;
     if (background) {
       if (!(await inbox.prepare(sessionId)).length) throw new Error("SHELL_COMPLETION_RETIRED");
+      await validateRetainedCompletions(sessionId);
       modelContext = await journal.buildModelContext(sessionId);
     }
     if (currentUser) {
@@ -793,6 +812,7 @@ export function registerAgUiIpc(
           try { await journal.appendPresentation(sessionId, presentationMessageId, presentationRevision, presentation); }
           catch (error) { console.warn("[AgUiBridge] 用户展示更新失败:", error); }
         }
+        await validateRetainedCompletions(sessionId);
         modelContext = await journal.buildModelContext(sessionId);
       } catch (error) {
         perf.dump();
@@ -813,6 +833,7 @@ export function registerAgUiIpc(
     // 会话级模型解析（consumer #4）：bridge 完成唯一一次解析（binding + effective model），
     // build-options 直接消费，不再按 modelProfileId 重解析（#26：防 effective 被覆盖回默认）
     const sessionModelSettings = resolveSessionModelSettings(loadModelSettings(), session);
+    if (!modelContext) await validateRetainedCompletions(sessionId);
     built = await perf.track("build_options", () => buildOptionsFn!({
       ...safeInput,
       mode,

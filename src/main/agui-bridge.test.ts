@@ -1850,6 +1850,9 @@ describe("agui-bridge background shell smoke (mock sessions, isolated SQLite)", 
       else if (outcome === "cancelled") mocks.handlers.get(IPC.AGUI_CANCEL)!({}, consumer.runId);
       else mocks.finishRuns.get(consumer.runId!)!({ status: outcome === "success" ? "success" : "runtime_error", reason: "fixture" });
       await expect.poll(() => bridge.__getSessionActiveRunForTest("original")).toBeUndefined();
+      // 本轮失败不使 Shell 结果失效，尚未变更工作区时必须仍可供用户续问。
+      expect(JSON.stringify((await new ConversationJournalService({ store }).buildModelContext("original")).messages)).toContain("foreground-A");
+      expect((await store.readAuditEntries("original")).filter(entry => entry.kind === "background_event_retired")).toHaveLength(0);
       if (failRetirement) {
         await expect(bridge.prepareBackgroundSessionMutation("original")).rejects.toThrow("RETIRE_FAILED");
         failRetirement = false;
@@ -1865,6 +1868,53 @@ describe("agui-bridge background shell smoke (mock sessions, isolated SQLite)", 
       expect(audit.filter(entry => entry.kind === "background_event_retired")).toHaveLength(outcome === "success" ? 0 : 1);
       expect(mocks.runCyreneAgent).toHaveBeenCalledTimes(background ? 2 : 1);
     } finally { failRetirement = false; spy.mockRestore(); }
+  });
+
+  it.each(["runtime_error", "stream_error"])("keeps failed %s output for a successful same-workspace retry", async failure => {
+    const original = await start();
+    await expect.poll(() => bridge.__getSessionActiveRunForTest("original")).toBeUndefined();
+    mocks.skipDefaultRunFinished = true; mocks.neverComplete = true;
+    original.onShellJobComplete!(snapshot("retained-A"));
+    await expect.poll(() => mocks.runCyreneAgent.mock.calls.length).toBe(2);
+    const resumed = mocks.runCyreneAgent.mock.calls[1][0] as typeof original;
+    if (failure === "stream_error") mocks.failRuns.get(resumed.runId!)!();
+    else mocks.finishRuns.get(resumed.runId!)!({ status: "runtime_error", reason: "model failed" });
+    await expect.poll(() => bridge.__getSessionActiveRunForTest("original")).toBeUndefined();
+    mocks.skipDefaultRunFinished = false; mocks.neverComplete = false;
+    mocks.runFinishedResult = { status: "success", reason: "done" };
+    await mocks.handlers.get(IPC.AGUI_RUN)!({}, { sessionId: "original", assistantTurnId: "retry-turn",
+      currentUser: { turnId: "retry-user", text: "continue", visibleContent: "continue" } });
+    await expect.poll(() => bridge.__getSessionActiveRunForTest("original")).toBeUndefined();
+    const retry = mocks.runCyreneAgent.mock.calls[2][0] as typeof original;
+    expect(JSON.stringify(retry.messages)).toContain("retained-A");
+    expect(await retry.pollShellCompletions!()).toEqual([]);
+    const finish = await bridge.prepareBackgroundSessionMutation("original");
+    finish(true);
+    const { getConversationTranscriptStore } = await import("./orchestrator/conversation-transcript-store");
+    expect((await getConversationTranscriptStore(mocks.userDataRoot).readAuditEntries("original"))
+      .filter(entry => entry.kind === "background_event_retired")).toHaveLength(0);
+  });
+
+  it("retires retained failed output when its source branch is rewound before retry", async () => {
+    const original = await start();
+    await expect.poll(() => bridge.__getSessionActiveRunForTest("original")).toBeUndefined();
+    const { getConversationTranscriptStore } = await import("./orchestrator/conversation-transcript-store");
+    const store = getConversationTranscriptStore(mocks.userDataRoot);
+    await store.append("original", { kind: "user", id: "source-user", turnId: "source-user", revision: 1, at: 1, payload: { text: "old task" } });
+    await store.append("original", { kind: "assistant", id: "source-assistant", runId: original.runId, at: 2, payload: { role: "assistant", content: "launched shell" } });
+    mocks.runFinishedResult = { status: "runtime_error", reason: "model failed" };
+    original.onShellJobComplete!(snapshot("rewound-retained"));
+    await expect.poll(() => mocks.runCyreneAgent.mock.calls.length).toBe(2);
+    await expect.poll(() => bridge.__getSessionActiveRunForTest("original")).toBeUndefined();
+    expect((await store.readAuditEntries("original")).filter(entry => entry.kind === "background_event_retired")).toHaveLength(0);
+    await store.append("original", { kind: "turn_rewind", id: "rewind-source", at: 3,
+      payload: { anchorUserTurnId: "source-user", disposition: "keep_user", reason: "regenerate" } });
+    mocks.runFinishedResult = { status: "success", reason: "done" };
+    await mocks.handlers.get(IPC.AGUI_RUN)!({}, { sessionId: "original", assistantTurnId: "retry-turn",
+      currentUser: { turnId: "retry-user", text: "continue", visibleContent: "continue" } });
+    await expect.poll(() => bridge.__getSessionActiveRunForTest("original")).toBeUndefined();
+    expect(JSON.stringify(mocks.runCyreneAgent.mock.calls[2][0].messages)).not.toContain("rewound-retained");
+    expect((await store.readAuditEntries("original")).filter(entry => entry.kind === "background_event_retired")).toHaveLength(1);
   });
 
   it.each(["runtime_error", "stream_error"])("retires acknowledged output after %s before rebinding", async failure => {
