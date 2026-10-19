@@ -10,6 +10,7 @@ describe("视口身份切换后的自动刷新护栏", () => {
     ["Agent 浏览器控制中", { controlled: true, picking: false, loading: false }],
     ["元素选择中", { controlled: false, picking: true, loading: false }],
     ["页面仍在加载", { controlled: false, picking: false, loading: true }],
+    ["最近一次导航被用户停止或加载失败", { controlled: false, picking: false, loading: false, interrupted: true }],
   ])("%s时延后刷新", (_label, state) => {
     expect(shouldDeferUserAgentReload(state)).toBe(true);
   });
@@ -58,7 +59,7 @@ describe("缓存响应是否按 User-Agent 区分", () => {
 });
 
 describe("带护栏刷新：输入探测返回后重新检查", () => {
-  const idle = { controlled: false, picking: false, loading: false, navigationGeneration: 1, stillNeeded: true };
+  const idle = { controlled: false, picking: false, loading: false, navigationGeneration: 1, inputGeneration: 0, stillNeeded: true };
 
   it("页面空闲、无输入：刷新一次", async () => {
     const reload = vi.fn();
@@ -109,6 +110,27 @@ describe("带护栏刷新：输入探测返回后重新检查", () => {
     const reload = vi.fn();
     await reloadForUserAgentIfIdle({ snapshot: () => idle, hasUserInput: async () => true, reload });
     await reloadForUserAgentIfIdle({ snapshot: () => ({ ...idle, stillNeeded: false }), hasUserInput: async () => false, reload });
+    expect(reload).not.toHaveBeenCalled();
+  });
+
+  it("探测读到「无输入」后、刷新前用户开始输入（输入代次变化）：放弃刷新，不丢刚输入的内容", async () => {
+    let state = { ...idle };
+    const reload = vi.fn();
+    const result = await reloadForUserAgentIfIdle({
+      snapshot: () => state,
+      // 页面里的探测脚本先读到 false，随后按键才到达：主进程已同步累加输入代次
+      hasUserInput: async () => { state = { ...state, inputGeneration: 1 }; return false; },
+      reload,
+    });
+    expect(result).toBe(false);
+    expect(reload).not.toHaveBeenCalled();
+  });
+
+  it("用户停止加载后：即使文档仍是旧身份也不刷新", async () => {
+    const reload = vi.fn();
+    const hasUserInput = vi.fn(async () => false);
+    await reloadForUserAgentIfIdle({ snapshot: () => ({ ...idle, interrupted: true }), hasUserInput, reload });
+    expect(hasUserInput).not.toHaveBeenCalled();
     expect(reload).not.toHaveBeenCalled();
   });
 });

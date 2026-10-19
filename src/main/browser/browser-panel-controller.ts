@@ -75,6 +75,10 @@ interface BrowserTab {
   userTyped?: boolean;
   /** 主框架跨文档导航计数，用于判断刷新前的异步探测期间是否有新导航开始。 */
   navigationGeneration?: number;
+  /** 被用户停止或加载失败的那次主框架导航的代次；与当前代次相同时不自动刷新。 */
+  interruptedNavigationGeneration?: number;
+  /** 编辑类按键与鼠标按下的计数，用于判断刷新前的异步探测期间用户是否开始输入。 */
+  inputGeneration?: number;
   /** 上一次因身份切换自动刷新的「历史条目:身份」，同一条目同一身份只自动刷新一次，防止缓存命中导致反复刷新。 */
   lastUserAgentReload?: string;
 }
@@ -962,8 +966,12 @@ export class BrowserPanelController {
   }
 
   stop(): void {
-    const contents = this.getActiveTab()?.view?.webContents;
-    if (contents && !contents.isDestroyed()) contents.stop();
+    const tab = this.getActiveTab();
+    const contents = tab?.view?.webContents;
+    if (!tab || !contents || contents.isDestroyed()) return;
+    // 文档已提交、只剩子资源时停止不会触发主框架 did-fail-load，这里直接记下，停止后不自动刷新
+    tab.interruptedNavigationGeneration = tab.navigationGeneration ?? 0;
+    contents.stop();
   }
 
   async clearCookies(): Promise<void> {
@@ -1243,11 +1251,18 @@ export class BrowserPanelController {
     if (!isExam) {
       view.webContents.on("dom-ready", () => watchUserInput(view.webContents));
       view.webContents.on("before-input-event", (_event, input) => {
-        if (tab.userTyped || !isEditingKeystroke(input)) return;
+        if (!isEditingKeystroke(input)) return;
+        // 先同步累加输入代次（此时页面还没收到这个按键），让进行中的刷新探测放弃
+        tab.inputGeneration = (tab.inputGeneration ?? 0) + 1;
+        if (tab.userTyped) return;
         // 只有焦点在可编辑元素上的按键才算输入：空格翻页、j/k 等网页快捷键不算
         void focusedElementIsEditable(view.webContents).then((editable) => {
           if (editable && tab.view === view) tab.userTyped = true;
         });
+      });
+      // 鼠标也能改动表单（勾选框、下拉框、右键粘贴），按下时同样累加输入代次
+      view.webContents.on("before-mouse-event", (_event, mouse) => {
+        if (mouse.type === "mouseDown") tab.inputGeneration = (tab.inputGeneration ?? 0) + 1;
       });
       // 任何入口发起的主框架跳转（链接、表单、前进后退、刷新、页面脚本）都按当前身份请求，
       // 请求头见 withTabUserAgent，响应来源见 onResponseStarted
@@ -1273,6 +1288,11 @@ export class BrowserPanelController {
       });
       // 加载结束时再判断：前进后退从缓存恢复了旧身份的文档、或加载期间切换了身份，
       // 都在页面加载完、不再处于加载中时带护栏补刷新一次
+      // 主框架加载失败（含用户停止时的 ERR_ABORTED）：记下这次导航，护栏不再用刷新把它重新拉起，
+      // 也不让旧条目的刷新盖掉失败页；用户下一次自己导航时代次变化，限制自然解除
+      view.webContents.on("did-fail-load", (_event, _errorCode, _description, _validatedUrl, isMainFrame) => {
+        if (isMainFrame && tab.view === view) tab.interruptedNavigationGeneration = tab.navigationGeneration ?? 0;
+      });
       view.webContents.on("did-stop-loading", () => {
         if (tab.view !== view || view.webContents.isDestroyed()) return;
         if (this.activeTabId === tab.id && this.documentNeedsUserAgentReload(tab)) void this.reloadForUserAgentWhenIdle(tab, view);
@@ -1502,7 +1522,9 @@ export class BrowserPanelController {
           controlled: this.controlLease?.tabId === tab.id,
           picking: this.elementPickerTabId === tab.id,
           loading: contents.isLoading(),
+          interrupted: tab.interruptedNavigationGeneration === (tab.navigationGeneration ?? 0),
           navigationGeneration: tab.navigationGeneration ?? 0,
+          inputGeneration: tab.inputGeneration ?? 0,
           // 同一条目同一身份只自动刷新一次，防止缓存命中导致反复刷新
           stillNeeded: this.documentNeedsUserAgentReload(tab) && tab.lastUserAgentReload !== attempt,
         };

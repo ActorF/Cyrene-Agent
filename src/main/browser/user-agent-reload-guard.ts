@@ -103,23 +103,29 @@ export interface UserAgentReloadState {
   picking: boolean;
   /** 页面仍在加载。 */
   loading: boolean;
+  /** 最近一次主框架导航被用户停止或加载失败：不能用刷新把它重新拉起。 */
+  interrupted?: boolean;
 }
 
-/** 这些情况下先不刷新，保留待刷新标记，交给下一次宽度变化或切换标签时再判断。 */
+/** 这些情况下先不刷新，保留待刷新标记，交给下一次宽度变化、切换标签或用户自己导航时再判断。 */
 export function shouldDeferUserAgentReload(state: UserAgentReloadState): boolean {
-  return state.controlled || state.picking || state.loading;
+  return state.controlled || state.picking || state.loading || state.interrupted === true;
 }
 
 export interface UserAgentReloadSnapshot extends UserAgentReloadState {
   /** 主框架跨文档导航的计数；探测期间有新导航开始时会变化。 */
   navigationGeneration: number;
+  /** 用户编辑类按键与鼠标按下的计数（主进程在分发给页面前同步累加）；探测期间有新输入时会变化。 */
+  inputGeneration: number;
   /** 当前文档仍按旧身份渲染、仍需要刷新。 */
   stillNeeded: boolean;
 }
 
 /**
  * 带护栏地刷新：先检查页面状态，再异步探测用户输入，探测返回后重新读取一次状态——
- * 探测期间用户可能从地址栏 / 工具栏发起了导航，此时刷新会取消那次导航，必须放弃。
+ * 探测期间用户可能从地址栏 / 工具栏发起了导航（刷新会取消那次导航），
+ * 也可能刚开始输入（探测读到的是旧快照，刷新会丢掉刚输入的内容），两种情况都必须放弃。
+ * 输入代次在主进程收到输入事件时同步累加，早于页面处理该输入，因此探测返回后、刷新前到达的输入都能被发现。
  */
 export async function reloadForUserAgentIfIdle(options: {
   snapshot: () => UserAgentReloadSnapshot | null;
@@ -132,6 +138,7 @@ export async function reloadForUserAgentIfIdle(options: {
   const after = options.snapshot();
   if (!after || !after.stillNeeded || shouldDeferUserAgentReload(after)) return false;
   if (after.navigationGeneration !== before.navigationGeneration) return false;
+  if (after.inputGeneration !== before.inputGeneration) return false;
   options.reload();
   return true;
 }
