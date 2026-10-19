@@ -1,3 +1,4 @@
+import { requiresUserInteraction } from "./interactive-tools";
 /**
  * 工具分发器：统一 dispatch Harness 内置工具和普通工具。
  *
@@ -243,10 +244,10 @@ export async function dispatchToolCall(
   }
 
   // ── 普通工具 ──
-  if (ctx.includeInteractiveTools === false && call.name === "pop_quiz") {
+  const tool = ctx.tools.find((t) => t.id === call.name);
+  if (ctx.includeInteractiveTools === false && requiresUserInteraction(tool ?? { id: call.name })) {
     return { outcome: "failure", category: "not_found", tool: call.name, message: "当前渠道不支持交互式工具" };
   }
-  const tool = ctx.tools.find((t) => t.id === call.name);
 
   // 工具不存在
   if (!tool) {

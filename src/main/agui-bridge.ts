@@ -88,7 +88,7 @@ export async function disposeShellCompletionDispatch(): Promise<void> {
   const settlements = [...backgroundRunControllers.values()];
   for (const controller of backgroundRunControllers.keys()) controller.abort();
   const results = await Promise.allSettled([disposed, ...settlements,
-    ...[...pendingBackgroundRetirements.keys()].map(retryBackgroundRetirements),
+    ...[...pendingCompletionRetirements.keys()].map(retryCompletionRetirements),
   ]);
   const failure = results.find(result => result.status === "rejected");
   if (failure?.status === "rejected") throw failure.reason;
@@ -285,17 +285,41 @@ interface SessionActiveRun {
 }
 
 const sessionActiveRuns = new Map<string, SessionActiveRun>();
-const pendingBackgroundRetirements = new Map<string, Set<SessionActiveRun>>();
+const pendingCompletionRetirements = new Map<string, Set<SessionActiveRun>>();
 
-async function retryBackgroundRetirements(sessionId: string): Promise<void> {
-  const pending = pendingBackgroundRetirements.get(sessionId);
-  if (!pending) return;
-  for (const run of pending) {
+function queueCompletionRetirement(sessionId: string, run: SessionActiveRun): Set<SessionActiveRun> {
+  let pending = pendingCompletionRetirements.get(sessionId);
+  if (!pending) pendingCompletionRetirements.set(sessionId, pending = new Set());
+  pending.add(run);
+  return pending;
+}
+
+/** 前后台共用：先登记再写入，仅成功后移除，失败保留来源供重试。 */
+async function retireRunCompletions(sessionId: string, run: SessionActiveRun): Promise<void> {
+  const pending = queueCompletionRetirement(sessionId, run);
+  await run.retireCompletions();
+  pending.delete(run);
+  if (!pending.size && pendingCompletionRetirements.get(sessionId) === pending) pendingCompletionRetirements.delete(sessionId);
+}
+
+async function retryCompletionRetirements(sessionId: string): Promise<void> {
+  for (const run of [...pendingCompletionRetirements.get(sessionId) ?? []]) {
     await run.settled;
-    await run.retireCompletions();
-    pending.delete(run);
+    await retireRunCompletions(sessionId, run);
   }
-  if (!pending.size) pendingBackgroundRetirements.delete(sessionId);
+}
+
+async function settleRunCompletions(sessionId: string, runId: string, succeeded: boolean): Promise<void> {
+  const run = sessionActiveRuns.get(sessionId);
+  // 会话变更已接管退休的运行，须先释放守卫，再由等待 settled 的调用方处理。
+  if (succeeded || run?.runId !== runId || !run.completions.size
+    || pendingCompletionRetirements.get(sessionId)?.has(run)) return;
+  try {
+    // 此处不能等待自身 settled；退休完成后才释放会话守卫。
+    await retireRunCompletions(sessionId, run);
+  } catch (error) {
+    console.warn("[AgUiBridge] Shell 事件退休失败:", error);
+  }
 }
 
 /** 会话变更或删除前停止后台续轮，结算完成前不得修改会话。 */
@@ -303,13 +327,11 @@ export async function cancelBackgroundConversationRun(sessionId: string, suppres
   if (suppressWake) shellCompletions?.suppressWake(sessionId);
   const run = sessionActiveRuns.get(sessionId);
   if (run?.background) {
-    let pending = pendingBackgroundRetirements.get(sessionId);
-    if (!pending) pendingBackgroundRetirements.set(sessionId, pending = new Set());
-    pending.add(run);
+    queueCompletionRetirement(sessionId, run);
     run.abort();
   }
   // 失败时保留来源，即使运行守卫已经释放，后续操作仍须先完成退休。
-  await retryBackgroundRetirements(sessionId);
+  await retryCompletionRetirements(sessionId);
 }
 
 /** 删除或工作区变更由 IPC 结算暂停令牌；失败不会改变用户原有的停止状态。 */
@@ -422,7 +444,7 @@ export function registerAgUiIpc(
     catch {
       if (previousDispatchReady) return;
       await retryShellDisposals(predecessors);
-      await Promise.all([...pendingBackgroundRetirements.keys()].map(retryBackgroundRetirements));
+      await Promise.all([...pendingCompletionRetirements.keys()].map(retryCompletionRetirements));
     }
     previousDispatchReady = true;
   };
@@ -594,7 +616,7 @@ export function registerAgUiIpc(
     // 检查 + 注册在同一同步代码块内完成（JS 单线程，get 与 set 之间无 await = 原子），
     // 早于下方 buildOptions（async，存在竞态窗口，F5 后立即发消息即命中）。
     // 渲染端 busy 队列不参与正确性论证：无论 IPC 时序如何，这里都是最终边界。
-    await retryBackgroundRetirements(sessionId);
+    await retryCompletionRetirements(sessionId);
     const runAbortController = new AbortController();
     let releaseSessionGuard: (() => void) | null = null;
     for (let takeovers = 0; ; takeovers++) {
@@ -942,22 +964,7 @@ export function registerAgUiIpc(
       } catch (err) {
         console.warn("[AgUiBridge] 插话标记复位失败:", err);
       }
-      const run = sessionActiveRuns.get(sessionId);
-      if (settlementGate.get()?.status !== "success" && run?.runId === runId && run.completions.size > 0
-        && !pendingBackgroundRetirements.get(sessionId)?.has(run)) {
-        let pending = pendingBackgroundRetirements.get(sessionId);
-        if (!pending) pendingBackgroundRetirements.set(sessionId, pending = new Set());
-        pending.add(run);
-        // 已确认的事件仍需在失败后退休；写入失败则保留来源供会话变更前重试。
-        // 此处不能等待 run.settled：它由下方释放守卫时完成。
-        try {
-          await run.retireCompletions();
-          pending.delete(run);
-          if (!pending.size) pendingBackgroundRetirements.delete(sessionId);
-        } catch (error) {
-          console.warn("[AgUiBridge] 后台失败事件退休失败:", error);
-        }
-      }
+      await settleRunCompletions(sessionId, runId, settlementGate.get()?.status === "success");
       // 释放会话守卫（compare-and-delete）并 resolve settled：
       // 等待中的 takeover 此刻才被放行，保证其开局时旧 run 的 checkpoint 已落盘。
       releaseSessionGuard?.();

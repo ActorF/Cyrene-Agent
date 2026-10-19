@@ -1821,12 +1821,21 @@ describe("agui-bridge background shell smoke (mock sessions, isolated SQLite)", 
     await expect.poll(() => bridge.__getSessionActiveRunForTest("original")).toBeUndefined();
   });
 
-  it.each(["runtime_error", "stream_error", "cancelled", "retirement_failure", "success"])("settles foreground Shell consumption safely: %s", async outcome => {
-    mocks.skipDefaultRunFinished = true; mocks.neverComplete = true; mocks.completeOnAbort = true;
+  it.each(["foreground", "background"].flatMap(mode =>
+    ["runtime_error", "stream_error", "cancelled", "retirement_failure", "success"].map(outcome => ({ mode, outcome })),
+  ))("settles $mode Shell consumption safely: $outcome", async ({ mode, outcome }) => {
+    const background = mode === "background";
+    if (!background) { mocks.skipDefaultRunFinished = true; mocks.neverComplete = true; mocks.completeOnAbort = true; }
     const original = await start();
+    if (background) {
+      await expect.poll(() => bridge.__getSessionActiveRunForTest("original")).toBeUndefined();
+      mocks.skipDefaultRunFinished = true; mocks.neverComplete = true; mocks.completeOnAbort = true;
+    }
     original.onShellJobComplete!(snapshot("foreground-A"));
-    expect(await original.pollShellCompletions!()).toHaveLength(1);
-    expect(await original.pollShellCompletions!()).toEqual([]);
+    if (background) await expect.poll(() => mocks.runCyreneAgent.mock.calls.length, { timeout: 5000 }).toBe(2);
+    const consumer = (background ? mocks.runCyreneAgent.mock.calls[1][0] : original) as typeof original;
+    if (!background) expect(await consumer.pollShellCompletions!()).toHaveLength(1);
+    expect(await consumer.pollShellCompletions!()).toEqual([]);
     const { getConversationTranscriptStore } = await import("./orchestrator/conversation-transcript-store");
     const { ConversationJournalService } = await import("./orchestrator/conversation-journal-service");
     const store = getConversationTranscriptStore(mocks.userDataRoot);
@@ -1837,24 +1846,24 @@ describe("agui-bridge background shell smoke (mock sessions, isolated SQLite)", 
       return append(...args);
     });
     try {
-      if (outcome === "stream_error") mocks.failRuns.get(original.runId!)!();
-      else if (outcome === "cancelled") mocks.handlers.get(IPC.AGUI_CANCEL)!({}, original.runId);
-      else mocks.finishRuns.get(original.runId!)!({ status: outcome === "success" ? "success" : "runtime_error", reason: "fixture" });
+      if (outcome === "stream_error") mocks.failRuns.get(consumer.runId!)!();
+      else if (outcome === "cancelled") mocks.handlers.get(IPC.AGUI_CANCEL)!({}, consumer.runId);
+      else mocks.finishRuns.get(consumer.runId!)!({ status: outcome === "success" ? "success" : "runtime_error", reason: "fixture" });
       await expect.poll(() => bridge.__getSessionActiveRunForTest("original")).toBeUndefined();
       if (failRetirement) {
         await expect(bridge.prepareBackgroundSessionMutation("original")).rejects.toThrow("RETIRE_FAILED");
         failRetirement = false;
       }
-      const finish = await bridge.prepareBackgroundSessionMutation("original");
+      const finishes = await Promise.all([bridge.prepareBackgroundSessionMutation("original"), bridge.prepareBackgroundSessionMutation("original")]);
       mocks.getSession.mockImplementation((id: string) => ({ id, mode: "code", messages: [],
         workspaceBinding: { workspaceRoot: path.join(mocks.userDataRoot, "B"), displayName: "B", boundAt: 2 } }));
-      finish(true);
+      for (const finish of finishes) finish(true);
       const context = await new ConversationJournalService({ store }).buildModelContext("original");
       expect(JSON.stringify(context.messages).includes("foreground-A")).toBe(outcome === "success");
       const audit = await store.readAuditEntries("original");
       expect(audit.filter(entry => entry.kind === "background_event")).toHaveLength(1);
       expect(audit.filter(entry => entry.kind === "background_event_retired")).toHaveLength(outcome === "success" ? 0 : 1);
-      expect(mocks.runCyreneAgent).toHaveBeenCalledTimes(1);
+      expect(mocks.runCyreneAgent).toHaveBeenCalledTimes(background ? 2 : 1);
     } finally { failRetirement = false; spy.mockRestore(); }
   });
 
