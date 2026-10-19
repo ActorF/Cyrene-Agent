@@ -1158,6 +1158,23 @@ describe("agui-bridge session run guard", () => {
     return { bridge, runHandler };
   }
 
+  it("serializes Learn vault runs and releases the slot after cancellation", async () => {
+    mocks.getSession.mockImplementation((id: string) => ({ id, mode: "learn", messages: [], workspaceBinding: { workspaceRoot: mocks.userDataRoot, boundAt: 1 } }));
+    mocks.skipDefaultRunFinished = true; mocks.neverComplete = true; mocks.completeOnAbort = true;
+    const { bridge, runHandler } = await setupBridge();
+    const sender = makeSender();
+    const first = await runHandler({ sender }, { sessionId: "vault-a", assistantTurnId: "a" }) as { runId: string };
+    await expect(runHandler({ sender }, { sessionId: "vault-b", assistantTurnId: "b" })).rejects.toThrow("LEARN_RUN_ACTIVE");
+    expect(bridge.__getSessionActiveRunForTest("vault-a")).toBe(first.runId);
+    expect(bridge.__getSessionActiveRunForTest("vault-b")).toBeUndefined();
+    mocks.handlers.get(IPC.AGUI_CANCEL)!({}, first.runId);
+    await expect.poll(() => bridge.__getSessionActiveRunForTest("vault-a")).toBeUndefined();
+    const second = await runHandler({ sender }, { sessionId: "vault-b", assistantTurnId: "b-retry" }) as { runId: string };
+    expect(bridge.__getSessionActiveRunForTest("vault-b")).toBe(second.runId);
+    mocks.handlers.get(IPC.AGUI_CANCEL)!({}, second.runId);
+    await expect.poll(() => bridge.__getSessionActiveRunForTest("vault-b")).toBeUndefined();
+  });
+
   it("rejects a second same-session run with SESSION_RUN_ACTIVE while the first is unsettled", async () => {
     mocks.getSession.mockReturnValue({ id: "guard-1", mode: "chat" });
     mocks.skipDefaultRunFinished = true;
