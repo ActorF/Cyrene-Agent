@@ -33,6 +33,7 @@ import { obsidianWorkspace } from "./learn/obsidian/obsidian-workspace-service";
 import { registerObsidianTools, unregisterObsidianTools } from "./learn/obsidian/obsidian-tools";
 import { getAdapterForConfig } from "./orchestrator/vendors";
 import { perf } from "./perf-trace";
+import { getLocaleContext } from "./locale-context";
 import type { StyleId } from "../shared/style-sampling";
 import type { PendingTurnLifecycle } from "./plugin-host/pending-turn-lifecycle";
 import * as chatsStore from "./chats/chats-store";
@@ -652,11 +653,21 @@ export function registerAgUiIpc(
     for (let takeovers = 0; ; takeovers++) {
       const existing = sessionActiveRuns.get(sessionId);
       if (!existing) {
-        // Learn 的 Vault 和工具注册为全局单例，检查与占用之间不能 await。
+        // Learn 的工具和 Vault 使用全局注册，同步检查并占用运行槽位。
         const activeLearn = mode === "learn" ? [...sessionActiveRuns.values()].find(run => run.mode === "learn") : undefined;
         if (activeLearn) {
+          const error = `LEARN_RUN_ACTIVE:${activeLearn.runId}`;
+          if (currentUser && input.assistantTurnId) {
+            const locale = getLocaleContext().uiLocale.toLowerCase();
+            const notice = locale.startsWith("ja")
+              ? "別の学習会話が実行中のため、このターンはまだ実行されていません。そのタスクが完了してから再試行してください。"
+              : locale.startsWith("en")
+                ? "Another learning conversation is running, so this turn has not started. Please retry after that task finishes."
+                : "另一个学习会话正在运行，本轮尚未执行。请等待该任务结束后重试。";
+            await database.call("runs.rejectLearnBusy", sessionId, requestId, requestFacts, runId, { error, notice });
+          }
           endConversation();
-          throw new Error(`LEARN_RUN_ACTIVE:${activeLearn.runId}`);
+          throw new Error(error);
         }
         let resolveSettled!: () => void;
         const settled = new Promise<void>((resolve) => { resolveSettled = resolve; });

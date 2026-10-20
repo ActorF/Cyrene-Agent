@@ -478,13 +478,6 @@ MIT 仅约束本仓库的源代码，不适用于角色、Live2D 模型与美术
                 </a>
             </td>
             <td align="center">
-                <a href="https://github.com/lll69">
-                    <img src="https://avatars.githubusercontent.com/u/60803753?v=4" width="48;" alt="lll69"/>
-                    <br />
-                    <sub><b>lll69</b></sub>
-                </a>
-            </td>
-            <td align="center">
                 <a href="https://github.com/Unknownuserfrommars">
                     <img src="https://avatars.githubusercontent.com/u/163658509?v=4" width="48;" alt="Unknownuserfrommars"/>
                     <br />
@@ -492,10 +485,10 @@ MIT 仅约束本仓库的源代码，不适用于角色、Live2D 模型与美术
                 </a>
             </td>
             <td align="center">
-                <a href="https://github.com/yuxingyuzhong">
-                    <img src="https://avatars.githubusercontent.com/u/240125557?v=4" width="48;" alt="yuxingyuzhong"/>
+                <a href="https://github.com/lll69">
+                    <img src="https://avatars.githubusercontent.com/u/60803753?v=4" width="48;" alt="lll69"/>
                     <br />
-                    <sub><b>雨行雨中</b></sub>
+                    <sub><b>lll69</b></sub>
                 </a>
             </td>
             <td align="center">
@@ -503,6 +496,13 @@ MIT 仅约束本仓库的源代码，不适用于角色、Live2D 模型与美术
                     <img src="https://avatars.githubusercontent.com/u/155789159?v=4" width="48;" alt="ActorF"/>
                     <br />
                     <sub><b>Ying Fang</b></sub>
+                </a>
+            </td>
+            <td align="center">
+                <a href="https://github.com/yuxingyuzhong">
+                    <img src="https://avatars.githubusercontent.com/u/240125557?v=4" width="48;" alt="yuxingyuzhong"/>
+                    <br />
+                    <sub><b>雨行雨中</b></sub>
                 </a>
             </td>
             <td align="center">
@@ -520,12 +520,21 @@ MIT 仅约束本仓库的源代码，不适用于角色、Live2D 模型与美术
                 </a>
             </td>
             <td align="center">
+                <a href="https://github.com/ahwhshen">
+                    <img src="https://avatars.githubusercontent.com/u/317654555?v=4" width="48;" alt="ahwhshen"/>
+                    <br />
+                    <sub><b>ahwhshen</b></sub>
+                </a>
+            </td>
+            <td align="center">
                 <a href="https://github.com/modusensus">
                     <img src="https://avatars.githubusercontent.com/u/286686549?v=4" width="48;" alt="modusensus"/>
                     <br />
                     <sub><b>Modusensus</b></sub>
                 </a>
             </td>
+		</tr>
+		<tr>
             <td align="center">
                 <a href="https://github.com/boring9720">
                     <img src="https://avatars.githubusercontent.com/u/20534568?v=4" width="48;" alt="boring9720"/>
@@ -533,8 +542,6 @@ MIT 仅约束本仓库的源代码，不适用于角色、Live2D 模型与美术
                     <sub><b>chuxuan</b></sub>
                 </a>
             </td>
-		</tr>
-		<tr>
             <td align="center">
                 <a href="https://github.com/Tobi1chi">
                     <img src="https://avatars.githubusercontent.com/u/49900770?v=4" width="48;" alt="Tobi1chi"/>
@@ -547,13 +554,6 @@ MIT 仅约束本仓库的源代码，不适用于角色、Live2D 模型与美术
                     <img src="https://avatars.githubusercontent.com/u/89506631?v=4" width="48;" alt="proobker"/>
                     <br />
                     <sub><b>proobker</b></sub>
-                </a>
-            </td>
-            <td align="center">
-                <a href="https://github.com/ahwhshen">
-                    <img src="https://avatars.githubusercontent.com/u/317654555?v=4" width="48;" alt="ahwhshen"/>
-                    <br />
-                    <sub><b>ahwhshen</b></sub>
                 </a>
             </td>
 		</tr>
