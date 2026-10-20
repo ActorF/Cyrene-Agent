@@ -193,6 +193,7 @@ export class BrowserPanelController {
     if (!this.bounds || this.bounds.width <= 0 || this.bounds.height <= 0) {
       this.controlLease = null;
       this.setControlAction(undefined);
+      this.retryUserAgentReloadAfterGuard();
       return "右侧浏览器面板未能显示，请先打开浏览器标签后重试。";
     }
     if (tab.id !== this.activeTabId) this.activateTab(tab.id);
@@ -201,6 +202,7 @@ export class BrowserPanelController {
       catch {
         this.controlLease = null;
         this.setControlAction(undefined);
+        this.retryUserAgentReloadAfterGuard();
         return "右侧网页视图初始化失败，浏览器控制没有启动。";
       }
     }
@@ -215,6 +217,7 @@ export class BrowserPanelController {
     }
     this.controlLease = null;
     this.setControlAction(undefined);
+    this.retryUserAgentReloadAfterGuard();
     return "浏览器控制已退出；网页标签和登录状态保留。";
   }
 
@@ -437,7 +440,7 @@ export class BrowserPanelController {
     const contents = tab?.view?.webContents;
     if (!tab || !contents || contents.isDestroyed() || contents.isLoading() || !tab.state.url
       || !this.bounds || this.bounds.width <= 0 || this.bounds.height <= 0) return false;
-    this.cancelElementPicker();
+    this.clearElementPicker();
     try {
       const snapshot = await startPlaywrightElementPicker(contents);
       if (this.getActiveTab()?.id !== tab.id || tab.state.loading || contents.isDestroyed()) {
@@ -461,7 +464,15 @@ export class BrowserPanelController {
     }
   }
 
+  /** 用户取消元素选择（渲染进程经 IPC 调用）：释放护栏后补做被延后的身份刷新。 */
   cancelElementPicker(): boolean {
+    if (!this.clearElementPicker()) return false;
+    this.retryUserAgentReloadAfterGuard();
+    return true;
+  }
+
+  /** 内部清理：切换 / 关闭标签、页面开始加载、启动新的选择前调用，这些场景另有同步或不需要刷新。 */
+  private clearElementPicker(): boolean {
     const tabId = this.elementPickerTabId;
     if (!tabId) return false;
     this.elementPickerTabId = "";
@@ -521,6 +532,7 @@ export class BrowserPanelController {
     if (this.elementPickerTimer) clearTimeout(this.elementPickerTimer);
     this.elementPickerTimer = null;
     this.publish();
+    this.retryUserAgentReloadAfterGuard();
   }
 
   async getActivePageSnapshot(owner?: { conversationId?: string; runId?: string }): Promise<
@@ -893,7 +905,7 @@ export class BrowserPanelController {
       this.forgetTabObservations(this.activeTabId);
       this.forgetTabObservations(tabId);
     }
-    if (this.elementPickerTabId && this.elementPickerTabId !== tabId) this.cancelElementPicker();
+    if (this.elementPickerTabId && this.elementPickerTabId !== tabId) this.clearElementPicker();
     this.activeTabId = tab.id;
     tab.lastActivationOrder = ++this.activationSequence;
     if (this.bounds && tab.state.url && !tab.view) {
@@ -913,7 +925,7 @@ export class BrowserPanelController {
     const index = this.tabs.findIndex((candidate) => candidate.id === tabId);
     if (index < 0) return false;
     if (this.controlLease?.tabId === tabId) this.controlLease = null;
-    if (this.elementPickerTabId === tabId) this.cancelElementPicker();
+    if (this.elementPickerTabId === tabId) this.clearElementPicker();
     const tab = this.tabs[index];
     this.forgetTabObservations(tabId);
     if (this.tabs.length === 1) {
@@ -1335,7 +1347,7 @@ export class BrowserPanelController {
     };
     contents.on("did-start-loading", () => {
       if (!isLive()) return;
-      if (this.elementPickerTabId === tab.id) this.cancelElementPicker();
+      if (this.elementPickerTabId === tab.id) this.clearElementPicker();
       this.forgetTabObservations(tab.id);
       this.onPlaywrightSnapshotNavigation(contents);
       tab.state = { ...tab.state, loading: true, error: undefined, crashed: false, favicon: undefined };
@@ -1498,6 +1510,14 @@ export class BrowserPanelController {
   /** 当前文档按旧身份加载，需要刷新才能拿到对应版式。 */
   private documentNeedsUserAgentReload(tab: BrowserTab): boolean {
     return tab.kind !== "exam" && !!tab.state.url && tab.documentUserAgentKind !== this.userAgentSwitch.kind;
+  }
+
+  /**
+   * Agent 控制或元素选择结束时调用：这两种护栏只是暂缓刷新，宽度之后可能不再变化，
+   * 不在这里补一次，当前文档会一直停在旧身份，直到下一次缩放或切换标签。
+   */
+  private retryUserAgentReloadAfterGuard(): void {
+    this.syncUserAgents();
   }
 
   private syncUserAgents(): void {
