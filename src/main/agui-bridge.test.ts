@@ -1175,6 +1175,46 @@ describe("agui-bridge session run guard", () => {
     await expect.poll(() => bridge.__getSessionActiveRunForTest("vault-b")).toBeUndefined();
   });
 
+  it.each(['zh-CN', 'en', 'ja-JP'])("Learn 忙碌提示在 %s 下无需 renderer 检查点即可从真实存储恢复", async (locale) => {
+    mocks.skipDefaultRunFinished = true; mocks.neverComplete = true; mocks.completeOnAbort = true;
+    const { bridge, runHandler } = await setupBridge();
+    const { getConversationDatabase } = await import('./storage/conversation-database-client');
+    const { updateLocaleContext } = await import('./locale-context');
+    const translations = await import(`../renderer/react/i18n/${locale === 'en' ? 'en' : locale}.json`);
+    updateLocaleContext({ uiLocale: locale });
+    const database = getConversationDatabase(mocks.userDataRoot);
+    const create = async () => {
+      const session = await database.call<any>('chats.createSession', { mode: 'learn' });
+      await database.call('chats.setWorkspaceBinding', session.id, { workspaceRoot: mocks.userDataRoot, boundAt: 1 });
+      return session;
+    };
+    const firstSession = await create();
+    const secondSession = await create();
+    await database.call('chats.enqueuePendingMessage', secondSession.id, { id: 'busy-user', rawContent: '学习问题', visibleContent: '学习问题' });
+    expect(await database.call('chats.claimPendingMessage', secondSession.id)).toMatchObject({ ok: true, claimed: true });
+    mocks.getSession.mockImplementation((id: string) => database.call('chats.getSession', id));
+    const sender = makeSender();
+    const first = await runHandler({ sender }, { sessionId: firstSession.id, assistantTurnId: 'first' }) as { runId: string };
+    try {
+      const input = { sessionId: secondSession.id, assistantTurnId: 'busy-assistant', currentUser: { turnId: 'busy-user', text: '学习问题', visibleContent: '学习问题' } };
+      await expect(runHandler({ sender }, input)).rejects.toThrow('LEARN_RUN_ACTIVE');
+      expect(mocks.runCyreneAgent).toHaveBeenCalledTimes(1);
+      expect(bridge.__getSessionActiveRunForTest(firstSession.id)).toBe(first.runId);
+      expect(bridge.__getSessionActiveRunForTest(secondSession.id)).toBeUndefined();
+      await closeConversationDatabases();
+      const restored = await database.call<any>('chats.getSession', secondSession.id);
+      expect(restored.messages).toHaveLength(2);
+      expect(restored.messages[0]).toMatchObject({ role: 'user', content: '学习问题' });
+      expect(restored.messages[1]).toMatchObject({ id: 'busy-assistant', role: 'model', content: '',
+        processMessages: [{ content: translations.default.chatPage.learnRunActiveNotice }],
+        runSnapshot: { status: 'terminal', terminalStatus: 'runtime_error' } });
+    } finally {
+      updateLocaleContext({ uiLocale: 'zh-CN' });
+      mocks.handlers.get(IPC.AGUI_CANCEL)!({}, first.runId);
+      await expect.poll(() => bridge.__getSessionActiveRunForTest(firstSession.id)).toBeUndefined();
+    }
+  });
+
   it("rejects a second same-session run with SESSION_RUN_ACTIVE while the first is unsettled", async () => {
     mocks.getSession.mockReturnValue({ id: "guard-1", mode: "chat" });
     mocks.skipDefaultRunFinished = true;

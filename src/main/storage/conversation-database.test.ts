@@ -123,6 +123,60 @@ describe("conversation SQLite transactions", () => {
     expect(await client.call('tools.begin', 'c1', 'operation1', 'fingerprint')).toMatchObject({ outcome: { status: 'succeeded', output: 'done' } });
   });
   const facts = (text = 'hello') => ({ mode: 'chat', assistantTurnId: 'assistant1', currentUser: { turnId: 'u1', text, visibleContent: text } });
+  it.each(['send', 'pending', 'keep_user', 'replace_user'])("Learn 忙碌拒绝在 %s 后重启仍恢复关联用户和终态提示", async (source) => {
+    const session = await client.call<any>('chats.createSession', { mode: 'learn' });
+    const id = session.id;
+    const notice = '另一个学习会话正在运行，本轮尚未执行。请等待该任务结束后重试。';
+    const busy = { error: 'LEARN_RUN_ACTIVE:other-run', notice };
+    const rewind = source === 'keep_user' || source === 'replace_user';
+    if (rewind) {
+      await client.call('transcript.append', id, user());
+      await client.call('transcript.append', id, { id: 'old-answer', kind: 'assistant', turnId: 'old-assistant', at: 2, payload: { role: 'assistant', content: 'old answer' } });
+    }
+    if (source === 'pending') {
+      await client.call('chats.enqueuePendingMessage', id, { id: 'u1', rawContent: 'hello', visibleContent: 'hello' });
+      expect(await client.call('chats.claimPendingMessage', id)).toMatchObject({ ok: true, claimed: true });
+    }
+    const input = { ...facts(source === 'replace_user' ? 'edited' : 'hello'), mode: 'learn',
+      ...(rewind ? { transcriptRewind: { anchorUserTurnId: 'u1', disposition: source, expectedAssistantMessageId: 'old-assistant' } } : {}) };
+    if (source === 'send') input.currentUser.visibleContent = '展示文本';
+    const requestId = rewind ? 'assistant1' : 'u1';
+    await client.call('runs.rejectLearnBusy', id, requestId, input, 'busy-run', busy);
+    // 不写 renderer 检查点：模拟 invoke 返回前窗口已关闭。
+    await client.close();
+    const restored = await client.call<any>('chats.getSession', id);
+    expect(restored.messages).toHaveLength(2);
+    expect(restored.messages[0]).toMatchObject({ role: 'user', content: source === 'send' ? '展示文本' : source === 'replace_user' ? 'edited' : 'hello' });
+    expect(restored.messages[1]).toMatchObject({ id: 'assistant1', role: 'model', content: '',
+      processMessages: [{ id: 'process-0', content: notice }],
+      runSnapshot: { status: 'terminal', terminalStatus: 'runtime_error' } });
+    const entries = await client.call<TranscriptEntry[]>('transcript.audit', id);
+    const assistant = entries.find(entry => entry.kind === 'assistant' && entry.turnId === 'assistant1');
+    expect(assistant).toMatchObject({ runId: expect.any(String) });
+    expect(await client.call('runs.lookup', id, requestId, input)).toMatchObject({ runId: assistant!.runId, status: 'failed', error: busy.error });
+    await client.call('runs.rejectLearnBusy', id, requestId, input, 'retry-run', busy);
+    expect(await client.call('transcript.audit', id)).toEqual(entries);
+    // 原有 renderer 终态检查点仍可更新该 canonical target。
+    await client.call('transcript.presentation', id, 'assistant1', 'renderer-terminal', {
+      processMessages: [{ id: 'process-0', content: notice, seq: 2 }],
+      runSnapshot: { status: 'terminal', terminalStatus: 'runtime_error', updatedAt: 5 },
+    }, 5);
+    await client.close();
+    expect((await client.call<any>('chats.getSession', id)).messages[1].processMessages).toEqual([{ id: 'process-0', content: notice, seq: 2 }]);
+    // 失败终态不占运行槽，用户随后可以重新发送。
+    expect(await client.call('runs.admit', id, 'u2', { ...input, transcriptRewind: undefined,
+      assistantTurnId: 'assistant2', currentUser: { turnId: 'u2', text: 'retry', visibleContent: 'retry' } }, 'next-run')).toMatchObject({ duplicate: false });
+  });
+  it("Learn 忙碌终态写入失败时回滚用户、assistant 和运行回执", async () => {
+    const session = await client.call<any>('chats.createSession', { mode: 'learn' });
+    await client.call('transcript.audit', session.id);
+    withConversationDatabase(root, db => db.exec("CREATE TRIGGER fail_busy BEFORE INSERT ON transcript_entries WHEN NEW.kind='presentation_patch' BEGIN SELECT RAISE(ABORT,'INJECTED'); END"));
+    const input = { ...facts(), mode: 'learn' };
+    await expect(client.call('runs.rejectLearnBusy', session.id, 'u1', input, 'busy-run', { error: 'LEARN_RUN_ACTIVE:other', notice: '稍后重试' })).rejects.toThrow();
+    expect(await client.call('transcript.audit', session.id)).toEqual([]);
+    expect(await client.call('runs.lookup', session.id, 'u1', input)).toBeNull();
+    expect(await client.call('runs.all')).toEqual([]);
+  });
   it("returns one run for concurrent identical admissions and the completed receipt after restart", async () => {
     const [one, two] = await Promise.all([client.call<any>('runs.admit', 'c1', 'u1', facts(), 'r1'), client.call<any>('runs.admit', 'c1', 'u1', facts(), 'r2')]);
     expect(one.runId).toBe(two.runId);
