@@ -222,6 +222,12 @@ async function execute(method: string, args: any[]): Promise<unknown> {
             runSnapshot: { status: 'terminal', terminalStatus: 'runtime_error', updatedAt: at },
           }, at);
           runCommand(database, 'runs.terminal', [receipt.runId, 'failed', at, error]);
+          const record = database.record(id);
+          if (record?.schemaVersion === 2) {
+            record.messageCount = reduceTranscriptProjection(database.entries(id, true)).messages.length;
+            record.updatedAt = Math.max(record.updatedAt, at);
+            database.saveRecord(record);
+          }
           return { ...receipt, status: 'failed', error };
         }
         return receipt;
