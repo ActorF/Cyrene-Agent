@@ -142,6 +142,8 @@ function normalizeLoadedTask(raw: unknown): ScheduledTask | null {
       mode: normalizeMode(task.mode),
       approvalFingerprint: typeof task.approvalFingerprint === "string" ? task.approvalFingerprint : "",
     } : {}),
+    // 用户任务也需恢复保存的模式；旧任务缺失时沿用 Work 默认值。
+    ...(!ownerPluginId ? { mode: task.mode === "code" ? "code" : "work" } : {}),
   };
 }
 
