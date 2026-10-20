@@ -102,6 +102,8 @@
     }
   },
   "chatPage": {
+    "backgroundSettlementTitle": "バックグラウンド処理の確定待ち",
+    "backgroundSettlementPending": "この会話には確定していないバックグラウンド処理があります。変更は行われていません。しばらくしてから会話の削除またはワークスペースの変更を再試行してください。",
     "scrollToBottom": "一番下までスクロール",
     "screenshotAttachmentName": "スクリーンショット_{{ts}}.png",
     "pastedImageAttachmentName": "貼り付け画像_{{ts}}.png",

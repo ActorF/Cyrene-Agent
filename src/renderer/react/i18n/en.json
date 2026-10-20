@@ -86,6 +86,8 @@
     }
   },
   "chatPage": {
+    "backgroundSettlementTitle": "Background task is still settling",
+    "backgroundSettlementPending": "This conversation has a background task that has not finished settling. No change was made. Please try deleting the conversation or changing its workspace again later.",
     "scrollToBottom": "Scroll to bottom",
     "screenshotAttachmentName": "screenshot_{{ts}}.png",
     "pastedImageAttachmentName": "pasted-image_{{ts}}.png",

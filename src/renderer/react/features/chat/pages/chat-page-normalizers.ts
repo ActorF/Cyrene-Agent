@@ -116,3 +116,9 @@ export function getInitialMode(): ConversationMode {
   }
   return "chat";
 }
+
+/** 同时接受主进程返回的错误码和 Electron 包装后的拒绝信息。 */
+export function isShellCompletionSettlementPending(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error ?? "");
+  return /SHELL_COMPLETION_(?:SETTLEMENT_PENDING|SETTLEMENT_TIMEOUT)/.test(message);
+}
