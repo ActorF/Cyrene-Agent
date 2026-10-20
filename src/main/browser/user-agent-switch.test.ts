@@ -69,6 +69,16 @@ describe("视口身份切换时机", () => {
     expect(sw.kind).toBe("desktop");
   });
 
+  it("跨阈值后到结算前 pending 为真（护栏释放时据此不抢先刷新），结算后为假", () => {
+    const sw = new UserAgentSwitch(vi.fn());
+    sw.update("auto", 900);
+    expect(sw.pending).toBe(false);
+    sw.update("auto", 650);
+    expect(sw.pending).toBe(true);
+    vi.advanceTimersByTime(USER_AGENT_SWITCH_DELAY_MS);
+    expect(sw.pending).toBe(false);
+  });
+
   it("dispose 后不再触发同步", () => {
     const onSettled = vi.fn();
     const sw = new UserAgentSwitch(onSettled);

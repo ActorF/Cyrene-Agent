@@ -1298,13 +1298,21 @@ export class BrowserPanelController {
           tab.historyUserAgentKinds?.set(index, kind);
         }
       });
+      // 同文档跳转（pushState、hash）产生的新历史条目沿用当前文档的身份：
+      // 之后离开再后退恢复到这个条目时，按它真实的文档身份判断，而不是误用刚离开的别页身份
+      view.webContents.on("did-navigate-in-page", (_event, _url, isMainFrame) => {
+        if (!isMainFrame || tab.view !== view || view.webContents.isDestroyed() || !tab.documentUserAgentKind) return;
+        tab.historyUserAgentKinds?.set(view.webContents.navigationHistory.getActiveIndex(), tab.documentUserAgentKind);
+      });
+      // 主框架加载失败：记下这次导航，护栏不再用刷新把它重新拉起，也不让旧条目的刷新盖掉失败页；
+      // 用户下一次自己导航时代次变化，限制自然解除。ERR_ABORTED（-3）不算：用户点停止由 stop() 单独记录，
+      // 其余 -3 多是被新导航取代的旧请求，可能在新导航开始之后才到达，会把新导航误标为已中断
+      view.webContents.on("did-fail-load", (_event, errorCode, _description, _validatedUrl, isMainFrame) => {
+        if (!isMainFrame || errorCode === -3 || tab.view !== view) return;
+        tab.interruptedNavigationGeneration = tab.navigationGeneration ?? 0;
+      });
       // 加载结束时再判断：前进后退从缓存恢复了旧身份的文档、或加载期间切换了身份，
       // 都在页面加载完、不再处于加载中时带护栏补刷新一次
-      // 主框架加载失败（含用户停止时的 ERR_ABORTED）：记下这次导航，护栏不再用刷新把它重新拉起，
-      // 也不让旧条目的刷新盖掉失败页；用户下一次自己导航时代次变化，限制自然解除
-      view.webContents.on("did-fail-load", (_event, _errorCode, _description, _validatedUrl, isMainFrame) => {
-        if (isMainFrame && tab.view === view) tab.interruptedNavigationGeneration = tab.navigationGeneration ?? 0;
-      });
       view.webContents.on("did-stop-loading", () => {
         if (tab.view !== view || view.webContents.isDestroyed()) return;
         if (this.activeTabId === tab.id && this.documentNeedsUserAgentReload(tab)) void this.reloadForUserAgentWhenIdle(tab, view);
@@ -1515,8 +1523,10 @@ export class BrowserPanelController {
   /**
    * Agent 控制或元素选择结束时调用：这两种护栏只是暂缓刷新，宽度之后可能不再变化，
    * 不在这里补一次，当前文档会一直停在旧身份，直到下一次缩放或切换标签。
+   * 缩放防抖还在等待时不抢先刷新：分隔条可能仍在拖动，交给计时器结算后的同步统一处理。
    */
   private retryUserAgentReloadAfterGuard(): void {
+    if (this.userAgentSwitch.pending) return;
     this.syncUserAgents();
   }
 

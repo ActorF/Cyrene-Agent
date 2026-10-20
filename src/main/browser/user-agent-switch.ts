@@ -23,6 +23,11 @@ export class UserAgentSwitch {
     return this.current;
   }
 
+  /** 身份已切换、但宽度还没停下来，同步尚未结算。 */
+  get pending(): boolean {
+    return this.timer !== null;
+  }
+
   update(mode: BrowserViewportMode, width: number): void {
     const widthChanged = width !== this.lastWidth;
     this.lastWidth = width;
