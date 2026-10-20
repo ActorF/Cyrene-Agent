@@ -1446,9 +1446,13 @@ export class BrowserPanelController {
     this.getViewportMode = getter;
   }
 
-  /** 设置里切换模式后调用；applyBounds 只在尺寸变化时触发，这里立即按当前宽度重新判断。 */
+  /**
+   * 设置里切换模式后调用；applyBounds 只在尺寸变化时触发，这里立即重新判断。
+   * 打开设置页时面板被隐藏、bounds 为空或 0，applyBounds 会提前返回，所以按最后一次可见宽度判断。
+   */
   refreshViewportMode(): void {
-    this.applyBounds();
+    this.userAgentSwitch.changeMode(this.getViewportMode());
+    this.applySessionUserAgent();
   }
 
   private updateUserAgentKind(width: number): void {

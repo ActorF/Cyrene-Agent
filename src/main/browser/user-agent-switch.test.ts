@@ -81,6 +81,42 @@ describe("视口身份切换时机", () => {
   });
 });
 
+describe("设置里切换模式（面板可能被设置页隐藏）", () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  it("窄面板已是移动版，隐藏后切到 custom：按最后可见宽度立即切回桌面并同步一次", () => {
+    const onSettled = vi.fn();
+    const sw = new UserAgentSwitch(onSettled);
+    sw.update("auto", 500);
+    vi.advanceTimersByTime(USER_AGENT_SWITCH_DELAY_MS);
+    expect(sw.kind).toBe("mobile");
+    onSettled.mockClear();
+
+    // 打开设置页时面板 bounds 变为 0，控制器不会再以 0 调用 update
+    sw.changeMode("custom");
+    expect(sw.kind).toBe("desktop");
+    vi.advanceTimersByTime(USER_AGENT_SWITCH_DELAY_MS);
+    expect(onSettled).toHaveBeenCalledTimes(1);
+  });
+
+  it("隐藏期间切回 auto：按最后可见宽度恢复移动版", () => {
+    const sw = new UserAgentSwitch(vi.fn());
+    sw.update("auto", 500);
+    sw.changeMode("custom");
+    sw.changeMode("auto");
+    expect(sw.kind).toBe("mobile");
+  });
+
+  it("从未有过可见宽度：custom 为桌面版，auto 保持当前身份", () => {
+    const sw = new UserAgentSwitch(vi.fn());
+    sw.changeMode("auto");
+    expect(sw.kind).toBe("desktop");
+    sw.changeMode("custom");
+    expect(sw.kind).toBe("desktop");
+  });
+});
+
 describe("创建视图前按已知宽度确定身份", () => {
   it("prime 直接确定身份且不触发同步；随后同宽度上报立即同步（无重复切换）", () => {
     const onSettled = vi.fn();

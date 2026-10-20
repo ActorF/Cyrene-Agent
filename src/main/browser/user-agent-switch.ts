@@ -26,7 +26,22 @@ export class UserAgentSwitch {
   update(mode: BrowserViewportMode, width: number): void {
     const widthChanged = width !== this.lastWidth;
     this.lastWidth = width;
-    const next = resolveUserAgentKind(mode, width, this.current);
+    this.settle(resolveUserAgentKind(mode, width, this.current), widthChanged);
+  }
+
+  /**
+   * 设置里切换模式时调用，不依赖面板当前是否可见：打开设置页时面板被隐藏、尺寸为 0，
+   * 仍按最后一次可见宽度重新判断，隐藏期间页面自己发起的跳转也用新模式的身份。
+   * 还没有过可见宽度时，custom 直接是桌面版，auto 保持当前身份等首个尺寸。
+   */
+  changeMode(mode: BrowserViewportMode): void {
+    const next = this.lastWidth !== null
+      ? resolveUserAgentKind(mode, this.lastWidth, this.current)
+      : mode === "custom" ? "desktop" : this.current;
+    this.settle(next, false);
+  }
+
+  private settle(next: BrowserUserAgentKind, widthChanged: boolean): void {
     if (next !== this.current) {
       this.current = next;
       this.restartTimer();
