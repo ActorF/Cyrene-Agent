@@ -104,9 +104,8 @@ export const MINIMAX_REGISTRY = defineVendor({
     // 1M 上下文 + 原生多模态。effort 五档 low/medium/high/xhigh/max；思考不能关闭
     // （发送 thinking disabled 或 effort none 返回 400）→ supportsDisable=false。
     // 官方缺省 max，与 GLM-5.3 / Kimi K3 同属"思考爆炸"体质，产品默认压到 high。
-    // 前缀匹配同时覆盖旧的 -Preview 型号名，已保存该型号的配置不受影响。
-    // 必须排在 /^MiniMax-M3/ 之前，否则会被 M3 的 toggle 规则先吞掉。
-    { modelPattern: /^MiniMax-M3\.1/i, modelInferencePattern: /^MiniMax-M3\.1/i, metadata: {
+    // 官方核验只针对正式型号名，精确匹配；两条规则都必须排在 /^MiniMax-M3/ 之前，否则会被 M3 的 toggle 规则先吞掉。
+    { modelPattern: /^MiniMax-M3\.1-Flash$/i, modelInferencePattern: /^MiniMax-M3\.1-Flash$/i, metadata: {
       status: "supported",
       evidence: {
         kind: "official",
@@ -115,6 +114,15 @@ export const MINIMAX_REGISTRY = defineVendor({
         transports: ["anthropic"],
       },
     }, capability: {
+      control: "toggle-effort",
+      supportedEfforts: ["low", "medium", "high", "xhigh", "max"],
+      defaultEffort: "high",
+      requestStyle: "anthropic-adaptive",
+      supportsDisable: false,
+      autoEffort: "high",
+    } },
+    // 其余 M3.1 名称（含仅 Token Plan 可用的历史名称 -Preview）沿用同一能力，但未按当前文档核验，保留 legacy 元数据。
+    { modelPattern: /^MiniMax-M3\.1/i, modelInferencePattern: /^MiniMax-M3\.1/i, metadata: legacyMetadata("迁自 src/shared/vendor-registry/entries/minimax.ts"), capability: {
       control: "toggle-effort",
       supportedEfforts: ["low", "medium", "high", "xhigh", "max"],
       defaultEffort: "high",
