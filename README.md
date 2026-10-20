@@ -506,6 +506,13 @@ MIT 仅约束本仓库的源代码，不适用于角色、Live2D 模型与美术
                 </a>
             </td>
             <td align="center">
+                <a href="https://github.com/ahwhshen">
+                    <img src="https://avatars.githubusercontent.com/u/317654555?v=4" width="48;" alt="ahwhshen"/>
+                    <br />
+                    <sub><b>ahwhshen</b></sub>
+                </a>
+            </td>
+            <td align="center">
                 <a href="https://github.com/lucifergzsz414">
                     <img src="https://avatars.githubusercontent.com/u/286201321?v=4" width="48;" alt="lucifergzsz414"/>
                     <br />
@@ -517,13 +524,6 @@ MIT 仅约束本仓库的源代码，不适用于角色、Live2D 模型与美术
                     <img src="https://avatars.githubusercontent.com/u/289515629?v=4" width="48;" alt="liyi3068238601-oss"/>
                     <br />
                     <sub><b>梨衣、</b></sub>
-                </a>
-            </td>
-            <td align="center">
-                <a href="https://github.com/ahwhshen">
-                    <img src="https://avatars.githubusercontent.com/u/317654555?v=4" width="48;" alt="ahwhshen"/>
-                    <br />
-                    <sub><b>ahwhshen</b></sub>
                 </a>
             </td>
             <td align="center">
