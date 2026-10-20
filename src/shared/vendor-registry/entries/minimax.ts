@@ -59,6 +59,17 @@ export const MINIMAX_REGISTRY = defineVendor({
         { feature: "structuredOutput", transport: "anthropic", note: "预设协议没有专用结构化输出规则，保留提示词 JSON 回退。" },
       ],
     },
+    // 2026-09-27 的预览版名称（仅 Token Plan / MiniMax Code），正式版发布后不再推荐；
+    // 已保存该名称的配置仍按 M3.1 推理规则处理。
+    {
+      model: "MiniMax-M3.1-Flash-Preview",
+      recommendedFor: [],
+      note: "历史清单保留名称；不改写用户请求。",
+      unknownCapabilities: [
+        { feature: "sampling", transport: "anthropic", note: "现有采样白名单未覆盖该型号。" },
+        { feature: "structuredOutput", transport: "anthropic", note: "预设协议没有专用结构化输出规则，保留提示词 JSON 回退。" },
+      ],
+    },
   ],
   shortName: "MiniMax",
   // 厂商怪癖：OpenAI 兼容文本 API 的 tool_choice 文档仅支持 auto/none，

@@ -11,6 +11,11 @@ describe("内置静态型号目录", () => {
     expect(MINIMAX_REGISTRY.capability.baseUrl).toBe("https://api.minimaxi.com/anthropic");
   });
 
+  it("正式版发布后预览版名称仍留在目录中，但不再推荐", () => {
+    const preview = MINIMAX_REGISTRY.models.find((entry) => entry.model === "MiniMax-M3.1-Flash-Preview");
+    expect(preview?.recommendedFor).toEqual([]);
+  });
+
   it("视觉推荐单独筛选，历史型号不自动推荐或改写", () => {
     expect(getBuiltinModels("mimo", "vision")).toEqual(["mimo-v2.6-pro", "mimo-v2.6-flash"]);
     expect(getBuiltinModels("mimo", "chat")).toEqual([
