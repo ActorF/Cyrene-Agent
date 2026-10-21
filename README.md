@@ -592,7 +592,7 @@ MIT 仅约束本仓库的源代码，不适用于角色、Live2D 模型与美术
 
 ---
 
-<img src="./docs/image/icons/star.svg" width="18" height="18" alt=""> 如果你喜欢这个项目，欢迎点一个 Star。这会帮助更多喜欢昔涟的人发现它。
+## <img src="./docs/image/icons/star.svg" width="20" height="20" alt=""> Star History
 
 <a href="https://www.star-history.com/?repos=playa-cyrene%2Fcyrene-agent&type=date&legend=bottom-right">
   <picture>
@@ -601,3 +601,5 @@ MIT 仅约束本仓库的源代码，不适用于角色、Live2D 模型与美术
     <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=playa-cyrene/cyrene-agent&type=date&legend=bottom-right" />
   </picture>
 </a>
+
+<img src="./docs/image/icons/star.svg" width="18" height="18" alt=""> 如果你喜欢这个项目，欢迎点一个 Star。这会帮助更多喜欢昔涟的人发现它。
