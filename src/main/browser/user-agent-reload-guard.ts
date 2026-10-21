@@ -105,11 +105,13 @@ export interface UserAgentReloadState {
   loading: boolean;
   /** 最近一次主框架导航被用户停止或加载失败：不能用刷新把它重新拉起。 */
   interrupted?: boolean;
+  /** 当前文档是表单 POST 的响应：刷新会重提交表单（可能重复下单、登录等），只能等用户下一次导航时应用新身份。 */
+  postDocument?: boolean;
 }
 
 /** 这些情况下先不刷新，保留待刷新标记，交给下一次宽度变化、切换标签或用户自己导航时再判断。 */
 export function shouldDeferUserAgentReload(state: UserAgentReloadState): boolean {
-  return state.controlled || state.picking || state.loading || state.interrupted === true;
+  return state.controlled || state.picking || state.loading || state.interrupted === true || state.postDocument === true;
 }
 
 export interface UserAgentReloadSnapshot extends UserAgentReloadState {

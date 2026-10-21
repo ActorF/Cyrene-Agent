@@ -11,6 +11,7 @@ describe("视口身份切换后的自动刷新护栏", () => {
     ["元素选择中", { controlled: false, picking: true, loading: false }],
     ["页面仍在加载", { controlled: false, picking: false, loading: true }],
     ["最近一次导航被用户停止或加载失败", { controlled: false, picking: false, loading: false, interrupted: true }],
+    ["当前文档是表单 POST 的响应（刷新会重提交）", { controlled: false, picking: false, loading: false, postDocument: true }],
   ])("%s时延后刷新", (_label, state) => {
     expect(shouldDeferUserAgentReload(state)).toBe(true);
   });

@@ -81,6 +81,12 @@ interface BrowserTab {
   inputGeneration?: number;
   /** 上一次因身份切换自动刷新的「历史条目:身份」，同一条目同一身份只自动刷新一次，防止缓存命中导致反复刷新。 */
   lastUserAgentReload?: string;
+  /** 进行中的主框架导航最后一次实际请求的方法（重定向后为最终请求）；没有请求时为空。 */
+  requestedMethod?: string;
+  /** 当前文档是否为 POST 响应；这类文档不自动刷新，避免重提交表单。 */
+  documentIsPost?: boolean;
+  /** 每个历史记录条目是否为 POST 响应，前进后退恢复时据此判断。 */
+  historyPostEntries?: Map<number, boolean>;
 }
 
 
@@ -1242,6 +1248,9 @@ export class BrowserPanelController {
     tab.documentUserAgentKind = isExam ? "desktop" : this.userAgentSwitch.kind;
     tab.requestedUserAgentKind = undefined;
     tab.historyUserAgentKinds = new Map();
+    tab.historyPostEntries = new Map();
+    tab.requestedMethod = undefined;
+    tab.documentIsPost = false;
     this.applySessionUserAgent();
     if (isExam) {
       const page = parseLearnExamPageRequest(tab.state.url);
@@ -1282,6 +1291,7 @@ export class BrowserPanelController {
         if (!details.isMainFrame || details.isSameDocument) return;
         tab.navigationGeneration = (tab.navigationGeneration ?? 0) + 1;
         tab.requestedUserAgentKind = undefined;
+        tab.requestedMethod = undefined;
       });
       // 提交时记下新文档的身份：有真实请求就是请求用的身份；前进后退从缓存恢复旧文档时
       // 没有请求，按该历史条目当初加载时的身份。仍与当前身份不符时再走带护栏的刷新
@@ -1297,12 +1307,21 @@ export class BrowserPanelController {
           tab.documentUserAgentKind = kind;
           tab.historyUserAgentKinds?.set(index, kind);
         }
+        // 有请求时按最终请求方法判断（POST 后 303 跳转到 GET 的结果页可以刷新）；缓存恢复没有请求，按历史条目记录
+        const post = tab.requestedMethod
+          ? tab.requestedMethod.toUpperCase() === "POST"
+          : tab.historyPostEntries?.get(index) ?? false;
+        tab.requestedMethod = undefined;
+        tab.documentIsPost = post;
+        tab.historyPostEntries?.set(index, post);
       });
       // 同文档跳转（pushState、hash）产生的新历史条目沿用当前文档的身份：
       // 之后离开再后退恢复到这个条目时，按它真实的文档身份判断，而不是误用刚离开的别页身份
       view.webContents.on("did-navigate-in-page", (_event, _url, isMainFrame) => {
         if (!isMainFrame || tab.view !== view || view.webContents.isDestroyed() || !tab.documentUserAgentKind) return;
-        tab.historyUserAgentKinds?.set(view.webContents.navigationHistory.getActiveIndex(), tab.documentUserAgentKind);
+        const index = view.webContents.navigationHistory.getActiveIndex();
+        tab.historyUserAgentKinds?.set(index, tab.documentUserAgentKind);
+        tab.historyPostEntries?.set(index, tab.documentIsPost === true);
       });
       // 主框架加载失败：记下这次导航，护栏不再用刷新把它重新拉起，也不让旧条目的刷新盖掉失败页；
       // 用户下一次自己导航时代次变化，限制自然解除。ERR_ABORTED（-3）不算：用户点停止由 stop() 单独记录，
@@ -1506,6 +1525,7 @@ export class BrowserPanelController {
     if (details.resourceType === "mainFrame") {
       kind = this.userAgentSwitch.kind;
       tab.requestedUserAgentKind = kind;
+      tab.requestedMethod = details.method;
     } else {
       kind = tab.documentUserAgentKind ?? "desktop";
     }
@@ -1557,6 +1577,7 @@ export class BrowserPanelController {
           picking: this.elementPickerTabId === tab.id,
           loading: contents.isLoading(),
           interrupted: tab.interruptedNavigationGeneration === (tab.navigationGeneration ?? 0),
+          postDocument: tab.documentIsPost === true,
           navigationGeneration: tab.navigationGeneration ?? 0,
           inputGeneration: tab.inputGeneration ?? 0,
           // 同一条目同一身份只自动刷新一次，防止缓存命中导致反复刷新
