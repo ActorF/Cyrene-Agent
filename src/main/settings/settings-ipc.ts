@@ -20,6 +20,7 @@ import { getTimeoutSettings, saveTimeoutSettings } from "../timeout-manager";
 import type { syncVolcanoSearchMcp } from "./general-settings-lifecycle";
 import type { syncPlaywrightMcp, syncFilesystemMcp } from "../sync-mcp-builtin";
 import { broadcastChatsChanged } from "../chats/chats-ipc";
+import { registerDataDirIpc } from "./data-dir-ipc";
 import { getBrowserPanelController } from "../browser/browser-panel-runtime";
 import { normalizeMemoryMode, type MemoryMode } from "../memory/memory-mode";
 import { getEffectiveUiTheme, watchSystemUiTheme } from "../system-ui-theme";
@@ -176,6 +177,8 @@ export function registerSettingsIpc(deps: SettingsIpcDependencies): void {
     await shell.showItemInFolder(filePath);
     return { ok: true, filePath };
   });
+
+  registerDataDirIpc(ipc);
 
   ipc.on(IPC.SETTINGS_SET_PET_ALWAYS_ON_TOP, (_event, value: boolean) => {
     const saved = saveGeneralSettings({ ...getGeneralSettings(), petAlwaysOnTop: Boolean(value) });
