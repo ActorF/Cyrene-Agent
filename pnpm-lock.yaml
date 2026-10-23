@@ -16,22 +16,22 @@ importers:
         version: 1.0.0
       '@ag-ui/core':
         specifier: 1.0.0
-        version: 1.0.0(zod@4.4.3)
+        version: 1.0.0(zod@4.6.7)
       '@ai-sdk/anthropic':
         specifier: 4.0.71
-        version: 4.0.71(zod@4.4.3)
+        version: 4.0.71(zod@4.6.7)
       '@ai-sdk/openai':
         specifier: 4.0.83
-        version: 4.0.83(zod@4.4.3)
+        version: 4.0.83(zod@4.6.7)
       '@ai-sdk/openai-compatible':
-        specifier: 3.0.62
-        version: 3.0.62(zod@4.4.3)
+        specifier: 3.0.71
+        version: 3.0.71(zod@4.6.7)
       '@anthropic-ai/sandbox-runtime':
-        specifier: ^0.0.71
-        version: 0.0.71
+        specifier: ^0.0.80
+        version: 0.0.80
       '@anthropic-ai/sdk':
         specifier: ^0.126.0
-        version: 0.126.0(zod@4.4.3)
+        version: 0.126.0(zod@4.6.7)
       '@ast-grep/napi':
         specifier: ^0.45.1
         version: 0.45.1
@@ -46,13 +46,13 @@ importers:
         version: 1.68.0
       '@modelcontextprotocol/sdk':
         specifier: ^1.29.0
-        version: 1.30.0(zod@4.4.3)
+        version: 1.30.0(zod@4.6.7)
       '@modelcontextprotocol/server-filesystem':
         specifier: 2026.8.31
-        version: 2026.8.31(zod@4.4.3)
+        version: 2026.8.31(zod@4.6.7)
       '@node-rs/jieba':
-        specifier: ^2.0.1
-        version: 2.0.1
+        specifier: ^2.0.4
+        version: 2.0.4
       '@nut-tree-fork/nut-js':
         specifier: ^4.2.6
         version: 4.2.6
@@ -64,7 +64,7 @@ importers:
         version: 2.17.2
       ai:
         specifier: 7.0.127
-        version: 7.0.127(zod@4.4.3)
+        version: 7.0.127(zod@4.6.7)
       ajv:
         specifier: ^8.20.0
         version: 8.20.0
@@ -100,19 +100,19 @@ importers:
         version: 5.0.0
       llamaindex:
         specifier: ^0.12.1
-        version: 0.12.1(@modelcontextprotocol/sdk@1.30.0(zod@4.4.3))(hono@4.12.25)(rxjs@7.8.1)(tree-sitter@0.22.4)(web-tree-sitter@0.24.7)(zod@4.4.3)
+        version: 0.12.1(@modelcontextprotocol/sdk@1.30.0(zod@4.6.7))(hono@4.12.25)(rxjs@7.8.1)(tree-sitter@0.22.4)(web-tree-sitter@0.24.7)(zod@4.6.7)
       marked:
         specifier: ^16.4.2
         version: 16.4.2
       music-metadata:
-        specifier: ^11.15.0
-        version: 11.15.0
+        specifier: ^12.2.1
+        version: 12.2.1
       nodemailer:
         specifier: ^9.0.1
         version: 9.0.1
       openai:
         specifier: 7.5.0
-        version: 7.5.0(ws@8.21.0)(zod@4.4.3)
+        version: 7.5.0(ws@8.21.0)(zod@4.6.7)
       package-manager-detector:
         specifier: ^1.8.0
         version: 1.8.0
@@ -401,8 +401,8 @@ packages:
     peerDependencies:
       zod: ^3.25.76 || ^4.1.8
 
-  '@ai-sdk/openai-compatible@3.0.62':
-    resolution: {integrity: sha512-IAz1xv8zot4KLGa8kN7UfAA6H5+ARzAgAKLsoKxHPBzZuOc2E3ohaELg0x/JR9HVTbMbiftb0dPyCb8cT2KBRg==}
+  '@ai-sdk/openai-compatible@3.0.71':
+    resolution: {integrity: sha512-8uvAsESbfoiUUa3DEXnM6bcpwObpsDrbv+6DgmkaiBJsONL0sBhglJhC61+X9yIxEuwE0YXwiQ7hfitxyzuFDQ==}
     engines: {node: '>=22'}
     peerDependencies:
       zod: ^3.25.76 || ^4.1.8
@@ -419,8 +419,18 @@ packages:
     peerDependencies:
       zod: ^3.25.76 || ^4.1.8
 
+  '@ai-sdk/provider-utils@5.0.62':
+    resolution: {integrity: sha512-//6sHa6QNQdM2KHOg5pxp1UMFQB4U8cqdw/kSm9BMr0DLeaFgG3TXZfxhpwRZmxgBpOrzMVZ/gwLXH309+Ortw==}
+    engines: {node: '>=22'}
+    peerDependencies:
+      zod: ^3.25.76 || ^4.1.8
+
   '@ai-sdk/provider@4.0.21':
     resolution: {integrity: sha512-UpbC9C1oht8dhfKPbVXSLRZS3DI8uk8n5v2uMjBPNIYGsC2kL045ywq7D8Hh9KgnH9rP5W/GxQdYtWScRouqlA==}
+    engines: {node: '>=22'}
+
+  '@ai-sdk/provider@4.0.29':
+    resolution: {integrity: sha512-nV7UpLADtKn9f0xfnxVZAeFEKuNkScJv5rOpHL7qeWe2EwEEBa3pd6P0QVK6D6coCJ0E8FyCgoM50AffTYrzDQ==}
     engines: {node: '>=22'}
 
   '@ant-design/colors@8.0.1':
@@ -468,9 +478,9 @@ packages:
   '@antfu/install-pkg@1.1.0':
     resolution: {integrity: sha512-MGQsmw10ZyI+EJo45CdSER4zEb+p31LpDAFp2Z3gkSd1yqVZGi0Ebx++YTEMonJy4oChEMLsxZ64j8FH6sSqtQ==}
 
-  '@anthropic-ai/sandbox-runtime@0.0.71':
-    resolution: {integrity: sha512-/ZMCavpMElD0ku2BlA95vezKUsVN0DD/wVd3WIEAfFjkTF2nsmzQA+MhejIWhuSUS9HpxMtTj57eFL+kdbKZ/A==}
-    engines: {node: '>=20.11.0'}
+  '@anthropic-ai/sandbox-runtime@0.0.80':
+    resolution: {integrity: sha512-WG4P8faU/JDH90I8NLUBPmg7e72zhanlW3AVCD0OF06JCtId9IDFewFgv4YRvHLcnn//h1r6a1AMosBsMLpxnA==}
+    engines: {node: '>=22.12.0'}
     hasBin: true
 
   '@anthropic-ai/sdk@0.126.0':
@@ -788,15 +798,6 @@ packages:
     resolution: {integrity: sha512-dfZeox66AvdPtb2lD8OsIIQh12Tp0GNCRUDfBHIKGpbmopZto2/A8nSpYYLoedPIHpqkeblZ/k8OV0Gy7PYuyQ==}
     engines: {node: '>=14.14'}
     hasBin: true
-
-  '@emnapi/core@1.11.3':
-    resolution: {integrity: sha512-zLpS5asjEb7lq8jYLq37N6XKaE41DIexlY1rF/z4/tIl3wo13Sqm28fRyfIsKZD+NZ8mM5RoKkpW/rBcuoSZSg==}
-
-  '@emnapi/runtime@1.11.3':
-    resolution: {integrity: sha512-Xz4Tpyki7XyrpbUK1jR1AhdAdaXyhhY4lZ3neLodmhpuWfy2PAQN5B46sAiU4liOXGLkHypn/qU+jvfWSCYYLA==}
-
-  '@emnapi/wasi-threads@1.2.3':
-    resolution: {integrity: sha512-ELEBe8PsLvvJ6QMr0zLt8ffvOHW/dc1m3CEzNMg7aJUv3bMaoDtw2TXyDAwkYBuroxxuHEwhRTLJSe5sya547g==}
 
   '@emoji-mart/data@1.2.1':
     resolution: {integrity: sha512-no2pQMWiBy6gpBEiqGeU77/bFejDqUTRY7KX+0+iur13op3bqUsXdnwoZs6Xb1zbv0gAj5VvS1PWoUUckSr5Dw==}
@@ -1475,9 +1476,6 @@ packages:
     resolution: {integrity: sha512-kKaFkyAh6oipvc9+EAbJ552JafnMnOq5nzmzWkp1jJdBhTAAGpmIpWihUG1+rfNhmEFM98gUZDdCHCDD4v6a7Q==}
     hasBin: true
 
-  '@napi-rs/wasm-runtime@0.2.12':
-    resolution: {integrity: sha512-ZVWUcfwY4E/yPitQJl481FjFo3K22D6qF0DuFH6Y/nbnE11GY5uguDxZMGXPQ8WQ0128MXQD7TnfHyK4oWoIJQ==}
-
   '@noble/ciphers@1.3.0':
     resolution: {integrity: sha512-2I0gnIVPtfnMw9ee9h1dJG7tp81+8Ob3OJb3Mv37rx5L40/b0i7djjCVvGOVqc9AEIQyvyu1i6ypKdFw8R8gQw==}
     engines: {node: ^14.21.3 || >=16}
@@ -1497,95 +1495,90 @@ packages:
   '@nodable/entities@3.1.0':
     resolution: {integrity: sha512-LsS/DjHr+uDM647Gru/cA8+J3a3HfhttwCKLyuoyN7yXTFCxKBtSgMQBvrW9yNPa2/zDRUNuGPaH5QUFoa4arQ==}
 
-  '@node-rs/jieba-android-arm-eabi@2.0.1':
-    resolution: {integrity: sha512-tavsIaxybnlA9tRbJ+oc3NW3zhx0d5rNiCGdpIdGWjflwS7HyeUTVAZmAFDlg58Mc6EjTdVKZH+RolBbAJtgcQ==}
+  '@node-rs/jieba-android-arm-eabi@2.0.4':
+    resolution: {integrity: sha512-cQkLpMGJQ3utAfmdUSHgto+zErR10qQglCd08zF1ZGBQfAcOP3lK+L53vpozxWpGngA2MsgMfb3uaXfBUrjLYw==}
     engines: {node: '>= 10'}
     cpu: [arm]
     os: [android]
 
-  '@node-rs/jieba-android-arm64@2.0.1':
-    resolution: {integrity: sha512-AwdyqKvVNuSDnDq3anUfq+nJ5J/kzXjkfbr/1WY6TfaAlTNuuGVskuQv72/wIx/jn7NoXfm/UPuJrWYG16NC6w==}
+  '@node-rs/jieba-android-arm64@2.0.4':
+    resolution: {integrity: sha512-qC1flCXhOuFMWKaiyyaLBI7FsGDCk8Gix85nG2RkEqj22jiQWSxvzIOJNIK/4FH0HSd7yrMgaw4nOyYNKGs55A==}
     engines: {node: '>= 10'}
     cpu: [arm64]
     os: [android]
 
-  '@node-rs/jieba-darwin-arm64@2.0.1':
-    resolution: {integrity: sha512-10+nwGQ6KzXXJlIL/sELA6Fi6m7eJ7xJksBiKuw1kxKUgaJwtVfAG0iqRF+NRQv0Sdq7r3k5ew9K9y0+IYaEcA==}
+  '@node-rs/jieba-darwin-arm64@2.0.4':
+    resolution: {integrity: sha512-/cGLKHB8dhcgTR7FRMvisXgPtt4Yiq9ygAQjHqskKKEOxrek60dJJzpgFPo5MY8EJyNInqxlRdN8H2a/vIFG7A==}
     engines: {node: '>= 10'}
     cpu: [arm64]
     os: [darwin]
 
-  '@node-rs/jieba-darwin-x64@2.0.1':
-    resolution: {integrity: sha512-IJ5RK0X/uPQa1XRmTvwKSieya+w1IJeiKLw0EekoBFJKybXQdvo8/uqM/8z2eVJ8vQxW9X6K2vkVGFvYQa9dYA==}
+  '@node-rs/jieba-darwin-x64@2.0.4':
+    resolution: {integrity: sha512-+sAHLzJF4XNrZUIwZBi1bBiwZDDSUVldW17cA94GBUb6F5UPB0OLq0ldOw8XtdA0MaotNnLlJQkm5ARuI1xheQ==}
     engines: {node: '>= 10'}
     cpu: [x64]
     os: [darwin]
 
-  '@node-rs/jieba-freebsd-x64@2.0.1':
-    resolution: {integrity: sha512-yg7vyhqzP2weJu5DJ3q9q4pb0b4GWWRwcv54zK7MSSA6KNJ/uQv2a4R9/qmptLU/fZv14gWuJBEMFdL7y1Dv2w==}
+  '@node-rs/jieba-freebsd-x64@2.0.4':
+    resolution: {integrity: sha512-v6MTAPnVhq2HnKH4ASWGfaFv7FEQZUEWve0/UtJx3ViiwYbG2pgZ3XZPRumXRIst0xdFfIoukrYqnMjj89HTVA==}
     engines: {node: '>= 10'}
     cpu: [x64]
     os: [freebsd]
 
-  '@node-rs/jieba-linux-arm-gnueabihf@2.0.1':
-    resolution: {integrity: sha512-fxQYunS7w2tv8XV9GigkWJPzHnbcw6tjrUdDu5/qU0FdQVEzGuEYG85DjlNf8lZTDGSUKHBVyAQs7bBIvq8yqg==}
+  '@node-rs/jieba-linux-arm-gnueabihf@2.0.4':
+    resolution: {integrity: sha512-Y7Wm7nhV9UNfq4ojCN6HSbjO1p1pyqDZyGlwAT1NsruGRvowC0luhXEFTo6VSDMIQ7PTP+IQXZfuc5d7fgTDFA==}
     engines: {node: '>= 10'}
     cpu: [arm]
     os: [linux]
 
-  '@node-rs/jieba-linux-arm64-gnu@2.0.1':
-    resolution: {integrity: sha512-VnLU630hQIyO/fwyxh2vqZi72mO+hXkVUC3jVLPfOAlppinmsGX9N81tpTPUK3840hbV8WLtbYTWN1XodI38eg==}
+  '@node-rs/jieba-linux-arm64-gnu@2.0.4':
+    resolution: {integrity: sha512-+x5FP4PDoRAagSvxyXeK3GdWjzZwigTD9GGyTWEKGViGcSUrY3/IsuPmVmOax3jHeQZkcX8aazybRiEwy2vIbQ==}
     engines: {node: '>= 10'}
     cpu: [arm64]
     os: [linux]
     libc: [glibc]
 
-  '@node-rs/jieba-linux-arm64-musl@2.0.1':
-    resolution: {integrity: sha512-K4EDyNixSLVdTNYnHwD+7I/ytvzpo7tt+vdCLqwQViiek2PMpL/FFRvA39uU2tk99jXIxvkczdxARG20BRZppg==}
+  '@node-rs/jieba-linux-arm64-musl@2.0.4':
+    resolution: {integrity: sha512-PyIXG7eyScZ1jN7ZqMS7XE2qei1PVQd3AnvdYwgTaUawkQxNQGeCOGARuzXYxqpYV+ipg5zju+VJ23j3ucE0RQ==}
     engines: {node: '>= 10'}
     cpu: [arm64]
     os: [linux]
     libc: [musl]
 
-  '@node-rs/jieba-linux-x64-gnu@2.0.1':
-    resolution: {integrity: sha512-sq3J6L2ANTE25I9eVFq/nb57OtXcvUIeUD1CTKJxwgTKIVmcB2LyOZpWf20AjHRUfbMER9Klqg5dgyyO+Six+w==}
+  '@node-rs/jieba-linux-x64-gnu@2.0.4':
+    resolution: {integrity: sha512-VjetEm7IoerpyhIaASJg2HcADFZ+mTEBc18ciKqCt15Wdu1Tmv44vF0XUHKYBH0Q7U3LhoXXswTgjb/pcH3K+Q==}
     engines: {node: '>= 10'}
     cpu: [x64]
     os: [linux]
     libc: [glibc]
 
-  '@node-rs/jieba-linux-x64-musl@2.0.1':
-    resolution: {integrity: sha512-0zfP9Qy68yEXrhBFknfhF6WUJDPU/8eRuyIrkMGdMjfRpxhpSbr2fMfnsqhOQLvhuK4w3iDFvTy4t5d0s6JKMA==}
+  '@node-rs/jieba-linux-x64-musl@2.0.4':
+    resolution: {integrity: sha512-WK9gU+lMq0wAuaDcFaqbr03Rv4/tNb9hFwfG3mYI96uG5TdVK2DBuRKzoPHP7XVz6iEmOu98lfhmL2/1Y0/DAw==}
     engines: {node: '>= 10'}
     cpu: [x64]
     os: [linux]
     libc: [musl]
 
-  '@node-rs/jieba-wasm32-wasi@2.0.1':
-    resolution: {integrity: sha512-7I5rJya5rlQNJIhv8PvPzIVT1/gVc0vFzHmlfRGwCPGDJ3tHVxkSPW34dDx3OgDmbIeadNpmgIyC1RaS9djPJg==}
-    engines: {node: '>=14.0.0'}
-    cpu: [wasm32]
-
-  '@node-rs/jieba-win32-arm64-msvc@2.0.1':
-    resolution: {integrity: sha512-Aj/2EwYSaPgAbKnSl+vKM/2kOaZNMZWnShiZzbSNyzlLy3eIOyOYVLbYRDno4547KngRxer8uzROhIQIwXwkvw==}
+  '@node-rs/jieba-win32-arm64-msvc@2.0.4':
+    resolution: {integrity: sha512-tcRW2cMHjYFfDPqG/St59ZoaR34CyLQJ5I4NGhZIfVhbYftJWnjvGPZBFdbudjgRCJ1in6rOZalDNGDex9+DHA==}
     engines: {node: '>= 10'}
     cpu: [arm64]
     os: [win32]
 
-  '@node-rs/jieba-win32-ia32-msvc@2.0.1':
-    resolution: {integrity: sha512-tpJt3uuBlGrcOInQLTYvcgamQgfadl5cwExLYU+CX9rXKpXLDO31dIujUDBgNWoiQq3tOiU1/AKbT7ZdNd4lBQ==}
+  '@node-rs/jieba-win32-ia32-msvc@2.0.4':
+    resolution: {integrity: sha512-I8+WnUD1FKIIC2NdunUE9EpoQRUM0iAeKvAxpOzpO1xDhw1D2Ya/9qY1K/xibnh8jGEGZnE4Bsc27zt9M/ZQow==}
     engines: {node: '>= 10'}
     cpu: [ia32]
     os: [win32]
 
-  '@node-rs/jieba-win32-x64-msvc@2.0.1':
-    resolution: {integrity: sha512-LDOyo2/2CO8UnpSGLJdgqtH8mOnsABPhNxkfIky7UT9cyLEzOaU44nbA5YzPGpBI3qzMbWcwJYQsjBcgK2VqAg==}
+  '@node-rs/jieba-win32-x64-msvc@2.0.4':
+    resolution: {integrity: sha512-aR6tFs1Lk7lZW/gy1q+F1GFdMqJVpLvAT5zpRCE+QbZSj9KRfKNooa5Y7c9v5yrxx4EH3vB31J3SWRR+OmVpog==}
     engines: {node: '>= 10'}
     cpu: [x64]
     os: [win32]
 
-  '@node-rs/jieba@2.0.1':
-    resolution: {integrity: sha512-tnfzXOMqzVQF2dSKMhPC9HrHzzWmN6KheL/zYtGenhOpq/bCKHJWVASSggEnHlkmHgXGeIJHR2N/IuPzewz1BQ==}
+  '@node-rs/jieba@2.0.4':
+    resolution: {integrity: sha512-/dTk3vV/v8+RIEUP7XOCkqRCVU0tqL3Ia9VTzHt38IDysGQmX7T56tM2IpwCLAWXubH7TyrcY54Stjsvcrbjqw==}
     engines: {node: '>= 10'}
 
   '@nut-tree-fork/default-clipboard-provider@4.2.6':
@@ -3265,15 +3258,12 @@ packages:
   '@tanstack/virtual-core@3.19.5':
     resolution: {integrity: sha512-X/wq6DtSK/XClznMM+I4JE63yyIwmyPk4Ts83bD0VKaIbwHNdRsO5QipCPX+3OovqYyr0puQNpbmp8+SPhspNg==}
 
-  '@tokenizer/inflate@0.4.1':
-    resolution: {integrity: sha512-2mAv+8pkG6GIZiF1kNg1jAjh27IDxEPKwdGul3snfztFerfPGI1LjDezZp3i7BElXompqEtPmoPx6c2wgtWsOA==}
+  '@tokenizer/inflate@0.5.1':
+    resolution: {integrity: sha512-56U2O6fDLFtqokwWh597IdeUgtM7j+TT9tb1soybhgA6cy163gAcVmoQr8H4Ud/CkgCkViwcuLyqtn6wYqw59Q==}
     engines: {node: '>=18'}
 
   '@tokenizer/token@0.3.0':
     resolution: {integrity: sha512-OvjF+z51L3ov0OyAU0duzsYuvO01PH7x4t6DJx+guahgTnBHkhJdG7soQeTSFLWN3efnHyibZ4Z8l2EuWwJN3A==}
-
-  '@tybys/wasm-util@0.10.4':
-    resolution: {integrity: sha512-W3c4gRigFS0T/Ma4qIYF3GDAc5AQdHb1yL5znJT1Zv1YaD9Kitx656wBjvr19qbiosmZT8lWDM5BEMynUqX65A==}
 
   '@types/cacheable-request@6.0.3':
     resolution: {integrity: sha512-IQ3EbTzGxIigb1I3qPZc1rWJnH0BmSKv5QYTalEwweFvyBDLSAe24zP0le/hyi7ecGfZVlIVAg4BZqb8WBwKqw==}
@@ -4155,6 +4145,10 @@ packages:
     resolution: {integrity: sha512-mj7UPXE0jaqaOsukNZRUEfEi2AcL7C/vwmwcHV0O97eO1E1pxBZuyjlZrx5seTaNBg1U6+o35wpa35Qfcc+7ag==}
     engines: {node: '>=18'}
 
+  content-type@3.1.1:
+    resolution: {integrity: sha512-GW4qUsfFo59d0HbUibDlWv5wPz+vAAcaTWbKIuKCf0JkC7wWkSyf8f13IpXn5JkeMlB2P8iTSSIjwXljorg2vA==}
+    engines: {node: '>=22'}
+
   conventional-changelog-config-spec@2.1.0:
     resolution: {integrity: sha512-IpVePh16EbbB02V+UA+HQnnPIohgXvJRxHcS5+Uwk4AT5LjzCZJm5sp/yqs5C6KZJ1jMsV4paEV13BN1pvDuxQ==}
 
@@ -4788,6 +4782,10 @@ packages:
     resolution: {integrity: sha512-kJezFj9YFAMLeORyi7aCLxLbD5/qWMQnoMVlVPyHIll7lgRJCc3JVln9Vgl9nwQi0YkMnhdGTMNn7CkRRAptMg==}
     engines: {node: '>=18.0.0'}
 
+  eventsource-parser@3.1.1:
+    resolution: {integrity: sha512-EKN1vKAMcZ8MlYMpaNuxN6R9yakzH6uajHcHVTqWJzvu5pWw9DyhbP35HH8MVBQ+dZjAfDxk+A8NiR9KWaXiyQ==}
+    engines: {node: '>=18.0.0'}
+
   eventsource@3.0.7:
     resolution: {integrity: sha512-CRT1WTyuQoD771GW56XEZFQ/ZoSfWid1alKGDYMmkt2yl8UXrVR4pspqWNEcqKvVIzg6PAltWjxcSSPrboA4iA==}
     engines: {node: '>=18.0.0'}
@@ -4900,9 +4898,9 @@ packages:
     resolution: {integrity: sha512-/yFHK0aGjFEgDJjEKP0pWCplsPFPhwyfwevf/pVxiN0tmE4L9LmwWxWukdJSHdoCli4VgQLehjJtwQBnqmsKcw==}
     engines: {node: '>=10'}
 
-  file-type@21.3.4:
-    resolution: {integrity: sha512-Ievi/yy8DS3ygGvT47PjSfdFoX+2isQueoYP1cntFW1JLYAuS4GD7NUPGg4zv2iZfV52uDyk5w5Z0TdpRS6Q1g==}
-    engines: {node: '>=20'}
+  file-type@22.2.0:
+    resolution: {integrity: sha512-XmEVJsRpQMVYC+sWFW+FKAVo2P7/lPctDdWH4UQ1r6oxhdrTobnowdM3z+ZJ93a4J8D3yDpxX0bEvRuFev0vUQ==}
+    engines: {node: '>=22'}
 
   file-uri-to-path@1.0.0:
     resolution: {integrity: sha512-0Zt+s3L7Vf1biwWZ29aARiVYLx7iMGnEUl9x33fbB/j3jR81u/O2LbqK+Bm1CDSNDKVtJ/YjwY7TUd5SkeLQLw==}
@@ -6015,8 +6013,8 @@ packages:
   mdn-data@2.27.1:
     resolution: {integrity: sha512-9Yubnt3e8A0OKwxYSXyhLymGW4sCufcLG6VdiDdUGVkPhpqLxlvP5vl1983gQjJl3tqbrM731mjaZaP68AgosQ==}
 
-  media-typer@1.1.0:
-    resolution: {integrity: sha512-aisnrDP4GNe06UcKFnV5bfMNPBUw4jsLGaWwWfnH3v02GnBuXX2MCVn5RbrWo0j3pczUilYblq7fQ7Nw2t5XKw==}
+  media-typer@1.1.1:
+    resolution: {integrity: sha512-yz3xRaG20c6/BOzvYoDaGtPmGscs7YivItZEEqe6GbwNfHuxu9YNmvnEkMzKldAGY4/80pRcQRZSEnhquk9XuQ==}
     engines: {node: '>= 0.8'}
 
   media-typer@2.0.0:
@@ -6264,9 +6262,9 @@ packages:
   ms@2.1.3:
     resolution: {integrity: sha512-6FlzubTLZG3J2a/NVCAleEhjzq5oxgHyaCU9yYXvcLsvoVaHJq/s5xXI6/XXP6tz7R9xAOtHnSO/tXtF3WRTlA==}
 
-  music-metadata@11.15.0:
-    resolution: {integrity: sha512-TN+kO1/oOc8UzDW5N3vSDncBcv9WyNnQQe/NFMcFWq6G1+zVeYUkGvkYpQ/S8wb8vKtUD7i78dIaY0cv+cmPRA==}
-    engines: {node: '>=18'}
+  music-metadata@12.2.1:
+    resolution: {integrity: sha512-JB/bnmQAa8HiKHuIg9dupGFjCKpdsocm9nJrTQe31f5zTaKfJmTwJwOvH1yVL91/jwFNKTOAOIPrHo3L5XwGfQ==}
+    engines: {node: '>=22'}
 
   nanoid@3.3.20:
     resolution: {integrity: sha512-uKdg2G3GNCKQn9byYOpxbGqrT2fGO5KRt5J/8b3pok8rT6qxGWF6hxMyJiEYtAf+FVyYuD9hRaDqX5uPFYJ4ZQ==}
@@ -7459,8 +7457,8 @@ packages:
   strnum@2.5.1:
     resolution: {integrity: sha512-UM4nTLWzQiDBseVxUGxN0wJzIk0UU89Qi7pKXz9qISo+lhviJikTuikBsK/oFRlpvYHvSdz0TVoLyQ+sEpYwxA==}
 
-  strtok3@10.3.5:
-    resolution: {integrity: sha512-ki4hZQfh5rX0QDLLkOCj+h+CVNkqmp/CMf8v8kZpkNVK6jGQooMytqzLZYUVYIZcFZ6yDB70EfD8POcFXiF5oA==}
+  strtok3@10.5.0:
+    resolution: {integrity: sha512-PgAsgIuizbZN/r4+g4UNvbVCTpJWdoIdI71kIWwKmdIH0vJ0q7ylMVGU8PWj2s9O98y4MtFWiDTIrtNukZMMgQ==}
     engines: {node: '>=18'}
 
   strtok3@6.3.0:
@@ -7707,8 +7705,8 @@ packages:
   uc.micro@1.0.6:
     resolution: {integrity: sha512-8Y75pvTYkLJW2hWQHXxoqRgV7qb9B+9vFEtidML+7koHUFapnVJAZ6cKs+Qjz5Aw3aZWHMC6u0wJE3At+nSGwA==}
 
-  uint8array-extras@1.5.0:
-    resolution: {integrity: sha512-rvKSBiC5zqCCiDZ9kAOszZcDvdAHwwIKJG33Ykj43OKcWsnmcBRL09YTU4nOeHZ8Y2a7l1MgTd08SBe9A8Qj6A==}
+  uint8array-extras@1.6.0:
+    resolution: {integrity: sha512-8iAasVS4wUx0gPLjH8Xtz2PeDzTSiy8QiLGu2DT3X5GU+egFEQhpnbtkehbAwjvDcxIERmCYcysiODFmE3Ud0Q==}
     engines: {node: '>=18'}
 
   undici-types@6.21.0:
@@ -8211,8 +8209,8 @@ packages:
   zod@3.25.76:
     resolution: {integrity: sha512-gzUt/qt81nXsFGKIFcC3YnfEAx5NkunCfnDlvuBSSFS02bcXu4Lmea0AFIUwbLWxWPx3d9p8S5QoaujKcNQxcQ==}
 
-  zod@4.4.3:
-    resolution: {integrity: sha512-ytENFjIJFl2UwYglde2jchW2Hwm4GJFLDiSXWdTrJQBIN9Fcyp7n4DhxJEiWNAJMV1/BqWfW/kkg71UDcHJyTQ==}
+  zod@4.6.7:
+    resolution: {integrity: sha512-g8W2D2kU6a8untc053fX1uVBKzM7yqAxW/3zwk83+6RyF2+SKOuV+c0wBDhUwzV1PaGapmZH+rmcUzPf+3CGwg==}
 
   zustand@3.7.2:
     resolution: {integrity: sha512-PIJDIZKtokhof+9+60cpockVOq05sJzHCriyvaLBmEJixseQ1a5Kdov6fWZfWOu5SK9c+FhH1jU0tntLxRJYMA==}
@@ -8245,9 +8243,9 @@ snapshots:
     optionalDependencies:
       zod: 3.25.76
 
-  '@ag-ui/core@1.0.0(zod@4.4.3)':
+  '@ag-ui/core@1.0.0(zod@4.6.7)':
     optionalDependencies:
-      zod: 4.4.3
+      zod: 4.6.7
 
   '@ag-ui/encoder@1.0.0(zod@3.25.76)':
     dependencies:
@@ -8263,41 +8261,54 @@ snapshots:
       '@protobuf-ts/protoc': 2.11.1
       zod: 3.25.76
 
-  '@ai-sdk/anthropic@4.0.71(zod@4.4.3)':
+  '@ai-sdk/anthropic@4.0.71(zod@4.6.7)':
     dependencies:
       '@ai-sdk/provider': 4.0.21
-      '@ai-sdk/provider-utils': 5.0.53(zod@4.4.3)
-      zod: 4.4.3
+      '@ai-sdk/provider-utils': 5.0.53(zod@4.6.7)
+      zod: 4.6.7
 
-  '@ai-sdk/gateway@4.0.103(zod@4.4.3)':
+  '@ai-sdk/gateway@4.0.103(zod@4.6.7)':
     dependencies:
       '@ai-sdk/provider': 4.0.21
-      '@ai-sdk/provider-utils': 5.0.53(zod@4.4.3)
+      '@ai-sdk/provider-utils': 5.0.53(zod@4.6.7)
       '@vercel/oidc': 3.2.0
-      zod: 4.4.3
+      zod: 4.6.7
 
-  '@ai-sdk/openai-compatible@3.0.62(zod@4.4.3)':
+  '@ai-sdk/openai-compatible@3.0.71(zod@4.6.7)':
+    dependencies:
+      '@ai-sdk/provider': 4.0.29
+      '@ai-sdk/provider-utils': 5.0.62(zod@4.6.7)
+      zod: 4.6.7
+
+  '@ai-sdk/openai@4.0.83(zod@4.6.7)':
     dependencies:
       '@ai-sdk/provider': 4.0.21
-      '@ai-sdk/provider-utils': 5.0.53(zod@4.4.3)
-      zod: 4.4.3
+      '@ai-sdk/provider-utils': 5.0.53(zod@4.6.7)
+      zod: 4.6.7
 
-  '@ai-sdk/openai@4.0.83(zod@4.4.3)':
-    dependencies:
-      '@ai-sdk/provider': 4.0.21
-      '@ai-sdk/provider-utils': 5.0.53(zod@4.4.3)
-      zod: 4.4.3
-
-  '@ai-sdk/provider-utils@5.0.53(zod@4.4.3)':
+  '@ai-sdk/provider-utils@5.0.53(zod@4.6.7)':
     dependencies:
       '@ai-sdk/provider': 4.0.21
       '@standard-schema/spec': 1.1.0
       '@workflow/serde': 4.1.0
-      eventsource-parser: 3.1.0
+      eventsource-parser: 3.1.1
       undici: 7.30.1
-      zod: 4.4.3
+      zod: 4.6.7
+
+  '@ai-sdk/provider-utils@5.0.62(zod@4.6.7)':
+    dependencies:
+      '@ai-sdk/provider': 4.0.29
+      '@standard-schema/spec': 1.1.0
+      '@workflow/serde': 4.1.0
+      eventsource-parser: 3.1.1
+      undici: 7.30.1
+      zod: 4.6.7
 
   '@ai-sdk/provider@4.0.21':
+    dependencies:
+      json-schema: 0.4.0
+
+  '@ai-sdk/provider@4.0.29':
     dependencies:
       json-schema: 0.4.0
 
@@ -8371,19 +8382,19 @@ snapshots:
       package-manager-detector: 1.8.0
       tinyexec: 1.3.1
 
-  '@anthropic-ai/sandbox-runtime@0.0.71':
+  '@anthropic-ai/sandbox-runtime@0.0.80':
     dependencies:
       '@pondwader/socks5-server': 1.0.10
       commander: 12.1.0
       node-forge: 1.4.0
       zod: 3.25.76
 
-  '@anthropic-ai/sdk@0.126.0(zod@4.4.3)':
+  '@anthropic-ai/sdk@0.126.0(zod@4.6.7)':
     dependencies:
       json-schema-to-ts: 3.1.1
       standardwebhooks: 1.0.0
     optionalDependencies:
-      zod: 4.4.3
+      zod: 4.6.7
 
   '@asamuzakjp/css-color@7.1.5':
     dependencies:
@@ -8718,22 +8729,6 @@ snapshots:
       - supports-color
     optional: true
 
-  '@emnapi/core@1.11.3':
-    dependencies:
-      '@emnapi/wasi-threads': 1.2.3
-      tslib: 2.8.1
-    optional: true
-
-  '@emnapi/runtime@1.11.3':
-    dependencies:
-      tslib: 2.8.1
-    optional: true
-
-  '@emnapi/wasi-threads@1.2.3':
-    dependencies:
-      tslib: 2.8.1
-    optional: true
-
   '@emoji-mart/data@1.2.1': {}
 
   '@emoji-mart/react@1.1.1(emoji-mart@5.6.0)(react@19.3.1)':
@@ -8924,9 +8919,9 @@ snapshots:
       lodash.isundefined: 3.0.1
       lodash.uniq: 4.5.0
 
-  '@finom/zod-to-json-schema@3.24.11(zod@4.4.3)':
+  '@finom/zod-to-json-schema@3.24.11(zod@4.6.7)':
     dependencies:
-      zod: 4.4.3
+      zod: 4.6.7
 
   '@floating-ui/core@1.8.0':
     dependencies:
@@ -9284,11 +9279,11 @@ snapshots:
 
   '@llamaindex/core@0.6.22':
     dependencies:
-      '@finom/zod-to-json-schema': 3.24.11(zod@4.4.3)
+      '@finom/zod-to-json-schema': 3.24.11(zod@4.6.7)
       '@llamaindex/env': 0.1.30
       '@types/node': 24.19.2
       magic-bytes.js: 1.13.0
-      zod: 4.4.3
+      zod: 4.6.7
     transitivePeerDependencies:
       - '@huggingface/transformers'
       - gpt-tokenizer
@@ -9307,18 +9302,18 @@ snapshots:
       tree-sitter: 0.22.4
       web-tree-sitter: 0.24.7
 
-  '@llamaindex/workflow-core@1.3.3(@modelcontextprotocol/sdk@1.30.0(zod@4.4.3))(hono@4.12.25)(rxjs@7.8.1)(zod@4.4.3)':
+  '@llamaindex/workflow-core@1.3.3(@modelcontextprotocol/sdk@1.30.0(zod@4.6.7))(hono@4.12.25)(rxjs@7.8.1)(zod@4.6.7)':
     optionalDependencies:
-      '@modelcontextprotocol/sdk': 1.30.0(zod@4.4.3)
+      '@modelcontextprotocol/sdk': 1.30.0(zod@4.6.7)
       hono: 4.12.25
       rxjs: 7.8.1
-      zod: 4.4.3
+      zod: 4.6.7
 
-  '@llamaindex/workflow@1.1.24(@llamaindex/core@0.6.22)(@llamaindex/env@0.1.30)(@modelcontextprotocol/sdk@1.30.0(zod@4.4.3))(hono@4.12.25)(rxjs@7.8.1)(zod@4.4.3)':
+  '@llamaindex/workflow@1.1.24(@llamaindex/core@0.6.22)(@llamaindex/env@0.1.30)(@modelcontextprotocol/sdk@1.30.0(zod@4.6.7))(hono@4.12.25)(rxjs@7.8.1)(zod@4.6.7)':
     dependencies:
       '@llamaindex/core': 0.6.22
       '@llamaindex/env': 0.1.30
-      '@llamaindex/workflow-core': 1.3.3(@modelcontextprotocol/sdk@1.30.0(zod@4.4.3))(hono@4.12.25)(rxjs@7.8.1)(zod@4.4.3)
+      '@llamaindex/workflow-core': 1.3.3(@modelcontextprotocol/sdk@1.30.0(zod@4.6.7))(hono@4.12.25)(rxjs@7.8.1)(zod@4.6.7)
     transitivePeerDependencies:
       - '@modelcontextprotocol/sdk'
       - hono
@@ -9547,7 +9542,7 @@ snapshots:
 
   '@mixmark-io/domino@2.2.0': {}
 
-  '@modelcontextprotocol/sdk@1.30.0(zod@4.4.3)':
+  '@modelcontextprotocol/sdk@1.30.0(zod@4.6.7)':
     dependencies:
       '@hono/node-server': 1.19.14(hono@4.12.25)
       ajv: 8.20.0
@@ -9564,14 +9559,14 @@ snapshots:
       json-schema-typed: 8.0.2
       pkce-challenge: 5.0.1
       raw-body: 3.0.2
-      zod: 4.4.3
-      zod-to-json-schema: 3.25.2(zod@4.4.3)
+      zod: 4.6.7
+      zod-to-json-schema: 3.25.2(zod@4.6.7)
     transitivePeerDependencies:
       - supports-color
 
-  '@modelcontextprotocol/server-filesystem@2026.8.31(zod@4.4.3)':
+  '@modelcontextprotocol/server-filesystem@2026.8.31(zod@4.6.7)':
     dependencies:
-      '@modelcontextprotocol/sdk': 1.30.0(zod@4.4.3)
+      '@modelcontextprotocol/sdk': 1.30.0(zod@4.6.7)
       diff: 8.0.4
       glob: 13.0.6
       minimatch: 10.2.6
@@ -9579,13 +9574,6 @@ snapshots:
       - '@cfworker/json-schema'
       - supports-color
       - zod
-
-  '@napi-rs/wasm-runtime@0.2.12':
-    dependencies:
-      '@emnapi/core': 1.11.3
-      '@emnapi/runtime': 1.11.3
-      '@tybys/wasm-util': 0.10.4
-    optional: true
 
   '@noble/ciphers@1.3.0': {}
 
@@ -9597,66 +9585,60 @@ snapshots:
 
   '@nodable/entities@3.1.0': {}
 
-  '@node-rs/jieba-android-arm-eabi@2.0.1':
+  '@node-rs/jieba-android-arm-eabi@2.0.4':
     optional: true
 
-  '@node-rs/jieba-android-arm64@2.0.1':
+  '@node-rs/jieba-android-arm64@2.0.4':
     optional: true
 
-  '@node-rs/jieba-darwin-arm64@2.0.1':
+  '@node-rs/jieba-darwin-arm64@2.0.4':
     optional: true
 
-  '@node-rs/jieba-darwin-x64@2.0.1':
+  '@node-rs/jieba-darwin-x64@2.0.4':
     optional: true
 
-  '@node-rs/jieba-freebsd-x64@2.0.1':
+  '@node-rs/jieba-freebsd-x64@2.0.4':
     optional: true
 
-  '@node-rs/jieba-linux-arm-gnueabihf@2.0.1':
+  '@node-rs/jieba-linux-arm-gnueabihf@2.0.4':
     optional: true
 
-  '@node-rs/jieba-linux-arm64-gnu@2.0.1':
+  '@node-rs/jieba-linux-arm64-gnu@2.0.4':
     optional: true
 
-  '@node-rs/jieba-linux-arm64-musl@2.0.1':
+  '@node-rs/jieba-linux-arm64-musl@2.0.4':
     optional: true
 
-  '@node-rs/jieba-linux-x64-gnu@2.0.1':
+  '@node-rs/jieba-linux-x64-gnu@2.0.4':
     optional: true
 
-  '@node-rs/jieba-linux-x64-musl@2.0.1':
+  '@node-rs/jieba-linux-x64-musl@2.0.4':
     optional: true
 
-  '@node-rs/jieba-wasm32-wasi@2.0.1':
-    dependencies:
-      '@napi-rs/wasm-runtime': 0.2.12
+  '@node-rs/jieba-win32-arm64-msvc@2.0.4':
     optional: true
 
-  '@node-rs/jieba-win32-arm64-msvc@2.0.1':
+  '@node-rs/jieba-win32-ia32-msvc@2.0.4':
     optional: true
 
-  '@node-rs/jieba-win32-ia32-msvc@2.0.1':
+  '@node-rs/jieba-win32-x64-msvc@2.0.4':
     optional: true
 
-  '@node-rs/jieba-win32-x64-msvc@2.0.1':
-    optional: true
-
-  '@node-rs/jieba@2.0.1':
+  '@node-rs/jieba@2.0.4':
     optionalDependencies:
-      '@node-rs/jieba-android-arm-eabi': 2.0.1
-      '@node-rs/jieba-android-arm64': 2.0.1
-      '@node-rs/jieba-darwin-arm64': 2.0.1
-      '@node-rs/jieba-darwin-x64': 2.0.1
-      '@node-rs/jieba-freebsd-x64': 2.0.1
-      '@node-rs/jieba-linux-arm-gnueabihf': 2.0.1
-      '@node-rs/jieba-linux-arm64-gnu': 2.0.1
-      '@node-rs/jieba-linux-arm64-musl': 2.0.1
-      '@node-rs/jieba-linux-x64-gnu': 2.0.1
-      '@node-rs/jieba-linux-x64-musl': 2.0.1
-      '@node-rs/jieba-wasm32-wasi': 2.0.1
-      '@node-rs/jieba-win32-arm64-msvc': 2.0.1
-      '@node-rs/jieba-win32-ia32-msvc': 2.0.1
-      '@node-rs/jieba-win32-x64-msvc': 2.0.1
+      '@node-rs/jieba-android-arm-eabi': 2.0.4
+      '@node-rs/jieba-android-arm64': 2.0.4
+      '@node-rs/jieba-darwin-arm64': 2.0.4
+      '@node-rs/jieba-darwin-x64': 2.0.4
+      '@node-rs/jieba-freebsd-x64': 2.0.4
+      '@node-rs/jieba-linux-arm-gnueabihf': 2.0.4
+      '@node-rs/jieba-linux-arm64-gnu': 2.0.4
+      '@node-rs/jieba-linux-arm64-musl': 2.0.4
+      '@node-rs/jieba-linux-x64-gnu': 2.0.4
+      '@node-rs/jieba-linux-x64-musl': 2.0.4
+      '@node-rs/jieba-win32-arm64-msvc': 2.0.4
+      '@node-rs/jieba-win32-ia32-msvc': 2.0.4
+      '@node-rs/jieba-win32-x64-msvc': 2.0.4
 
   '@nut-tree-fork/default-clipboard-provider@4.2.6':
     dependencies:
@@ -11395,7 +11377,7 @@ snapshots:
 
   '@tanstack/virtual-core@3.19.5': {}
 
-  '@tokenizer/inflate@0.4.1':
+  '@tokenizer/inflate@0.5.1':
     dependencies:
       debug: 4.4.3
       token-types: 6.1.2
@@ -11403,11 +11385,6 @@ snapshots:
       - supports-color
 
   '@tokenizer/token@0.3.0': {}
-
-  '@tybys/wasm-util@0.10.4':
-    dependencies:
-      tslib: 2.8.1
-    optional: true
 
   '@types/cacheable-request@6.0.3':
     dependencies:
@@ -11777,12 +11754,12 @@ snapshots:
       screenfull: 5.2.0
       tslib: 2.8.1
 
-  ai@7.0.127(zod@4.4.3):
+  ai@7.0.127(zod@4.6.7):
     dependencies:
-      '@ai-sdk/gateway': 4.0.103(zod@4.4.3)
+      '@ai-sdk/gateway': 4.0.103(zod@4.6.7)
       '@ai-sdk/provider': 4.0.21
-      '@ai-sdk/provider-utils': 5.0.53(zod@4.4.3)
-      zod: 4.4.3
+      '@ai-sdk/provider-utils': 5.0.53(zod@4.6.7)
+      zod: 4.6.7
 
   ajv-formats@3.0.1(ajv@8.20.0):
     optionalDependencies:
@@ -12431,6 +12408,8 @@ snapshots:
   content-type@1.0.5: {}
 
   content-type@2.1.0: {}
+
+  content-type@3.1.1: {}
 
   conventional-changelog-config-spec@2.1.0: {}
 
@@ -13152,9 +13131,11 @@ snapshots:
 
   eventsource-parser@3.1.0: {}
 
+  eventsource-parser@3.1.1: {}
+
   eventsource@3.0.7:
     dependencies:
-      eventsource-parser: 3.1.0
+      eventsource-parser: 3.1.1
 
   exceljs@4.4.0:
     dependencies:
@@ -13309,12 +13290,12 @@ snapshots:
       strtok3: 6.3.0
       token-types: 4.2.1
 
-  file-type@21.3.4:
+  file-type@22.2.0:
     dependencies:
-      '@tokenizer/inflate': 0.4.1
-      strtok3: 10.3.5
+      '@tokenizer/inflate': 0.5.1
+      strtok3: 10.5.0
       token-types: 6.1.2
-      uint8array-extras: 1.5.0
+      uint8array-extras: 1.6.0
     transitivePeerDependencies:
       - supports-color
 
@@ -14306,12 +14287,12 @@ snapshots:
       lit-element: 4.2.2
       lit-html: 3.3.3
 
-  llamaindex@0.12.1(@modelcontextprotocol/sdk@1.30.0(zod@4.4.3))(hono@4.12.25)(rxjs@7.8.1)(tree-sitter@0.22.4)(web-tree-sitter@0.24.7)(zod@4.4.3):
+  llamaindex@0.12.1(@modelcontextprotocol/sdk@1.30.0(zod@4.6.7))(hono@4.12.25)(rxjs@7.8.1)(tree-sitter@0.22.4)(web-tree-sitter@0.24.7)(zod@4.6.7):
     dependencies:
       '@llamaindex/core': 0.6.22
       '@llamaindex/env': 0.1.30
       '@llamaindex/node-parser': 2.0.22(@llamaindex/core@0.6.22)(@llamaindex/env@0.1.30)(tree-sitter@0.22.4)(web-tree-sitter@0.24.7)
-      '@llamaindex/workflow': 1.1.24(@llamaindex/core@0.6.22)(@llamaindex/env@0.1.30)(@modelcontextprotocol/sdk@1.30.0(zod@4.4.3))(hono@4.12.25)(rxjs@7.8.1)(zod@4.4.3)
+      '@llamaindex/workflow': 1.1.24(@llamaindex/core@0.6.22)(@llamaindex/env@0.1.30)(@modelcontextprotocol/sdk@1.30.0(zod@4.6.7))(hono@4.12.25)(rxjs@7.8.1)(zod@4.6.7)
       '@types/lodash': 4.17.24
       '@types/node': 24.19.2
       lodash: 4.18.1
@@ -14684,7 +14665,7 @@ snapshots:
 
   mdn-data@2.27.1: {}
 
-  media-typer@1.1.0: {}
+  media-typer@1.1.1: {}
 
   media-typer@2.0.0: {}
 
@@ -15099,17 +15080,17 @@ snapshots:
 
   ms@2.1.3: {}
 
-  music-metadata@11.15.0:
+  music-metadata@12.2.1:
     dependencies:
       '@borewit/text-codec': 0.2.2
       '@tokenizer/token': 0.3.0
-      content-type: 2.1.0
+      content-type: 3.1.1
       debug: 4.4.3
-      file-type: 21.3.4
+      file-type: 22.2.0
       media-typer: 2.0.0
-      strtok3: 10.3.5
+      strtok3: 10.5.0
       token-types: 6.1.2
-      uint8array-extras: 1.5.0
+      uint8array-extras: 1.6.0
       win-guid: 0.2.1
     transitivePeerDependencies:
       - supports-color
@@ -15241,10 +15222,10 @@ snapshots:
       onnxruntime-common: 1.14.0
       platform: 1.3.6
 
-  openai@7.5.0(ws@8.21.0)(zod@4.4.3):
+  openai@7.5.0(ws@8.21.0)(zod@4.6.7):
     optionalDependencies:
       ws: 8.21.0
-      zod: 4.4.3
+      zod: 4.6.7
 
   p-cancelable@2.1.1: {}
 
@@ -16539,7 +16520,7 @@ snapshots:
     dependencies:
       anynum: 1.0.1
 
-  strtok3@10.3.5:
+  strtok3@10.5.0:
     dependencies:
       '@tokenizer/token': 0.3.0
 
@@ -16785,7 +16766,7 @@ snapshots:
   type-is@2.1.0:
     dependencies:
       content-type: 2.1.0
-      media-typer: 1.1.0
+      media-typer: 1.1.1
       mime-types: 3.0.2
 
   typescript@5.4.5: {}
@@ -16798,7 +16779,7 @@ snapshots:
 
   uc.micro@1.0.6: {}
 
-  uint8array-extras@1.5.0: {}
+  uint8array-extras@1.6.0: {}
 
   undici-types@6.21.0: {}
 
@@ -17221,13 +17202,13 @@ snapshots:
       compress-commons: 4.1.2
       readable-stream: 3.6.2
 
-  zod-to-json-schema@3.25.2(zod@4.4.3):
+  zod-to-json-schema@3.25.2(zod@4.6.7):
     dependencies:
-      zod: 4.4.3
+      zod: 4.6.7
 
   zod@3.25.76: {}
 
-  zod@4.4.3: {}
+  zod@4.6.7: {}
 
   zustand@3.7.2(react@19.3.1):
     optionalDependencies:

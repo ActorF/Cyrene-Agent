@@ -719,6 +719,7 @@ export function createDefaultApplicationDependencies(): ApplicationDependencies 
           ipc,
           getWindow: () => reactChatWindow,
           getExamRecord: (examId) => examPaperStore.get(examId),
+          getViewportMode: () => loadGeneralSettings().browserViewportMode,
         });
         shutdown.register({
           id: "browser-panel-session",

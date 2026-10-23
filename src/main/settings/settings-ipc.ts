@@ -21,6 +21,7 @@ import type { syncVolcanoSearchMcp } from "./general-settings-lifecycle";
 import type { syncPlaywrightMcp, syncFilesystemMcp } from "../sync-mcp-builtin";
 import { broadcastChatsChanged } from "../chats/chats-ipc";
 import { registerDataDirIpc } from "./data-dir-ipc";
+import { getBrowserPanelController } from "../browser/browser-panel-runtime";
 import { normalizeMemoryMode, type MemoryMode } from "../memory/memory-mode";
 import { getEffectiveUiTheme, watchSystemUiTheme } from "../system-ui-theme";
 
@@ -128,6 +129,8 @@ export function registerSettingsIpc(deps: SettingsIpcDependencies): void {
 
   ipc.handle(IPC.SETTINGS_SAVE_GENERAL, (_event, settings: Partial<GeneralSettings>) => {
     const saved = saveGeneralSettings(settings);
+    // 浏览器视口模式切换后立即按当前面板宽度重新判断身份，无需拖动面板
+    if ("browserViewportMode" in settings) getBrowserPanelController()?.refreshViewportMode();
     if ("proactiveChatMode" in settings || "proactiveDeliveryTarget" in settings) {
       proactiveLifecycle.getProactiveChatService()?.invalidate();
     }
