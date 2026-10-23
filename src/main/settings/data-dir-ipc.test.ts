@@ -6,12 +6,11 @@ const electron = vi.hoisted(() => ({
   getPath: vi.fn((name: string) => (name === "userData" ? "C:\\Users\\demo\\AppData\\Roaming\\Cyrene" : "")),
 }));
 
-// 只替换 Electron 边界；handler → openStorageFolder → shell.openPath 走真实代码
+// 只替换 Electron 边界；handler → openUserDataFolder → shell.openPath 走真实代码
 vi.mock("electron", () => ({
   app: { getPath: electron.getPath },
   shell: { openPath: electron.openPath },
 }));
-vi.mock("../storage/conversation-database-client", () => ({ getConversationDatabase: vi.fn() }));
 
 import { registerDataDirIpc } from "./data-dir-ipc";
 
