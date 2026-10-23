@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Alert, Button, Spin } from "antd";
 import { FolderOpen, Info, Monitor, Settings2 } from "lucide-react";
 import packageJson from "../../../../../package.json";
@@ -43,6 +43,8 @@ export function GeneralSettingsPanel() {
   const [loadError, setLoadError] = useState(false);
   const [saving, setSaving] = useState(false);
   const [status, setStatus] = useState("");
+  // 最近一次「打开数据目录」失败时显示的提示；之后打开成功时只清除它，不覆盖其他状态
+  const dataDirErrorRef = useRef("");
   const [dataDir, setDataDir] = useState("");
   const updateState = useAppUpdate();
   const updateView = resolveAppUpdateView(updateState);
@@ -111,11 +113,23 @@ export function GeneralSettingsPanel() {
 
   /** 打开数据目录：系统无法打开时在状态栏提示，避免按钮静默无效 */
   async function openDataDir() {
+    const showError = (error: string) => {
+      const message = t("settingsPage.general.openDataDirFailed", { error });
+      dataDirErrorRef.current = message;
+      setStatus(message);
+    };
     try {
       const result = await window.settings?.openDataDir?.();
-      if (result && !result.ok) setStatus(t("settingsPage.general.openDataDirFailed", { error: result.error ?? "" }));
+      if (result && !result.ok) {
+        showError(result.error ?? "");
+        return;
+      }
+      // 失败后重试成功：清掉仍在显示的旧失败提示，避免目录已打开却继续报错
+      const stale = dataDirErrorRef.current;
+      dataDirErrorRef.current = "";
+      if (stale) setStatus((current) => (current === stale ? "" : current));
     } catch {
-      setStatus(t("settingsPage.general.openDataDirFailed", { error: "" }));
+      showError("");
     }
   }
 
