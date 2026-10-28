@@ -1,4 +1,4 @@
-import { Jieba } from "@node-rs/jieba";
+import { getSearchJieba } from "../search-jieba";
 
 export interface SearchToken {
   word: string;
@@ -17,7 +17,6 @@ export interface RankedTextCandidate<T> {
   score: number;
 }
 
-const jieba = new Jieba();
 const STOP_WORDS = new Set([
   "的", "了", "是", "在", "我", "你", "他", "她", "它", "有", "不", "也", "就", "都", "这", "那", "还", "要",
   "和", "与", "或", "但", "而", "且", "及", "之", "为", "上", "下", "中", "里", "外", "前", "后", "左", "右",
@@ -78,6 +77,7 @@ export function tokenizeText(text: string): SearchToken[] {
   }
 
   try {
+    const jieba = getSearchJieba();
     return mergeCustomWords(jieba.cut(text, true)).map((word) => {
       const first = jieba.tag(word, true)[0] ?? { word, tag: "x" };
       return {

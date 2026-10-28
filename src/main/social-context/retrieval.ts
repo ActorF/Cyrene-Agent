@@ -1,7 +1,6 @@
-import { Jieba } from "@node-rs/jieba";
+import { getSearchJieba } from "../search-jieba";
 import type { SocialAtom } from "./types";
 
-const jieba = new Jieba();
 const DAY_MS = 86_400_000;
 const HALF_LIFE_DAYS = 30;
 
@@ -9,6 +8,7 @@ function tokenize(text: string): string[] {
   const normalized = text.trim().toLowerCase();
   if (!normalized) return [];
   try {
+    const jieba = getSearchJieba();
     return jieba.cut(normalized, true)
       .map((token) => token.trim())
       .filter((token) => token.length > 0 && !/^\s+$/.test(token));
