@@ -6,6 +6,12 @@ import { logger } from "../shared/logger";
 // 原生模块保持外置，只在调用方的降级保护内按需加载。
 const requireNative = createRequire(__filename);
 let instance: Jieba | undefined;
+let generation = 0;
+
+/** 初始化成功后失效此前产生的降级分词缓存；读取版本不会触发加载。 */
+export function getSearchJiebaGeneration(): number {
+  return generation;
+}
 
 export function getSearchJieba(): Jieba {
   if (instance) return instance;
@@ -13,6 +19,7 @@ export function getSearchJieba(): Jieba {
   try {
     const { Jieba: NativeJieba } = requireNative("@node-rs/jieba") as typeof import("@node-rs/jieba");
     instance = new NativeJieba();
+    generation++;
     return instance;
   } catch (error) {
     // 原生加载器可能把底层错误数组挂在 cause 上；保留 code/stack，

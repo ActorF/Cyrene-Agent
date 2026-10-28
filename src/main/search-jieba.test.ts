@@ -117,4 +117,69 @@ describe("optional native search tokenizer", () => {
     expect(loadNative).toHaveBeenCalledOnce();
     expect(warn).not.toHaveBeenCalled();
   });
+
+  it.each(["load", "constructor"])("refreshes fallback-prewarmed documents after %s recovery", async (failure) => {
+    let available = false;
+    const cut = vi.fn((text: string) => [text]);
+    const native = { cut, tag: (word: string) => [{ word, tag: "n" }] };
+    loadNative.mockImplementation(() => {
+      if (!available && failure === "load") throw new Error("temporarily unavailable");
+      return { Jieba: class {
+        constructor() {
+          if (!available) throw new Error("temporarily unavailable");
+          return native;
+        }
+      } };
+    });
+    const { HybridRetriever } = await import("./rag/retriever");
+    const entries = [{ id: "beach", text: "海边", source: "test" }];
+    const store = { entries, stats: { total: entries.length } };
+    const retriever = new HybridRetriever(store as unknown as import("./rag/vectorstore").JsonVectorStore);
+    await retriever.warmupBm25Tokens(entries);
+    expect((await retriever.retrieve("海边"))[0].score).toBeGreaterThan(0);
+    available = true;
+    expect((await retriever.retrieve("海边"))[0].score).toBeGreaterThan(0);
+    const callsAfterRecovery = cut.mock.calls.length;
+    expect((await retriever.retrieve("海边"))[0].score).toBeGreaterThan(0);
+    // Stable documents stay cached; only the new query is tokenized.
+    expect(cut).toHaveBeenCalledTimes(callsAfterRecovery + 1);
+  });
+
+  it("refreshes an earlier warmup slice after a later slice recovers", async () => {
+    let attempts = 0;
+    const native = { cut: (text: string) => [text], tag: (word: string) => [{ word, tag: "n" }] };
+    loadNative.mockImplementation(() => {
+      if (attempts++ < 50) throw new Error("temporarily unavailable");
+      return { Jieba: class { constructor() { return native; } } };
+    });
+    const { HybridRetriever } = await import("./rag/retriever");
+    const entries = Array.from({ length: 51 }, (_, index) => ({ id: String(index), text: "海边", source: "test" }));
+    const store = { entries, stats: { total: entries.length } };
+    const retriever = new HybridRetriever(store as unknown as import("./rag/vectorstore").JsonVectorStore);
+    await retriever.warmupBm25Tokens(entries);
+    const results = await retriever.retrieve("海边", undefined, entries.length);
+    expect(results).toHaveLength(entries.length);
+    expect(results.every((result) => result.score > 0 && result.score === results[0].score)).toBe(true);
+    expect(loadNative).toHaveBeenCalledTimes(51);
+    expect(warn).toHaveBeenCalledTimes(50);
+  });
+
+  it.each([1, 2])("keeps a search coherent when initialization recovers after %i failed calls", async (failures) => {
+    const native = { cut: (text: string) => [text], tag: (word: string) => [{ word, tag: "n" }] };
+    let attempts = 0;
+    loadNative.mockImplementation(() => {
+      if (attempts++ < failures) throw new Error("temporarily unavailable");
+      return { Jieba: class { constructor() { return native; } } };
+    });
+    const { HybridRetriever } = await import("./rag/retriever");
+    const entries = [{ id: "first", text: "海边", source: "test" }, { id: "second", text: "海边", source: "test" }];
+    const store = { entries, stats: { total: entries.length } };
+    const retriever = new HybridRetriever(store as unknown as import("./rag/vectorstore").JsonVectorStore);
+    const results = await retriever.retrieve("海边");
+    expect(results).toHaveLength(2);
+    expect(results.every((result) => result.score > 0)).toBe(true);
+    expect(results[0].score).toBe(results[1].score);
+    expect(warn).toHaveBeenCalledTimes(failures);
+  });
+
 });
