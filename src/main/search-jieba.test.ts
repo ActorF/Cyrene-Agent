@@ -29,7 +29,7 @@ describe("optional native search tokenizer", () => {
     expect(warn).not.toHaveBeenCalled();
   });
 
-  it.each(["load", "constructor"])("falls back after %s failure and attempts initialization only once", async (failure) => {
+  it.each(["load", "constructor"])("retries once per call after %s failure, logs each failure, and keeps fallback ranking", async (failure) => {
     const nested = Object.assign(new Error("native DLL not found"), { code: "ERR_DLOPEN_FAILED" });
     const error = new Error("Failed to load native binding", { cause: [nested] });
     // Real loader errors may contain nested arrays or circular diagnostic data.
@@ -49,9 +49,11 @@ describe("optional native search tokenizer", () => {
     expect(ranked[0].score).toBeGreaterThan(0);
     expect(rankSocialAtoms("海边", [atom("爬山"), atom("喜欢海边")], { now: 0 })
       .map((item) => item.content)).toEqual(["喜欢海边"]);
-    expect(loadNative).toHaveBeenCalledExactlyOnceWith("@node-rs/jieba");
-    expect(construct).toHaveBeenCalledTimes(failure === "constructor" ? 1 : 0);
-    expect(warn).toHaveBeenCalledTimes(1);
+    // One standalone tokenization, then query + two candidates for each ranker.
+    expect(loadNative).toHaveBeenCalledTimes(7);
+    expect(loadNative.mock.calls.every(([name]) => name === "@node-rs/jieba")).toBe(true);
+    expect(construct).toHaveBeenCalledTimes(failure === "constructor" ? 7 : 0);
+    expect(warn).toHaveBeenCalledTimes(7);
     const [tag, label, detail] = warn.mock.calls[0];
     expect(tag).toBe("Search");
     expect(label).toContain("@node-rs/jieba");
@@ -61,6 +63,32 @@ describe("optional native search tokenizer", () => {
     expect(detail).toContain("ERR_DLOPEN_FAILED");
     expect(detail).toContain("search-jieba.test.ts");
     expect(detail).toContain("Circular");
+  });
+
+  it.each(["load", "constructor"])("recovers from %s failure on the next caller and then reuses the instance", async (failure) => {
+    const error = new Error("temporarily unavailable");
+    const native = {
+      cut: vi.fn(() => ["海边"]),
+      tag: vi.fn(() => [{ word: "海边", tag: "n" }]),
+    };
+    let constructionAttempts = 0;
+    const construct = vi.fn(function () {
+      if (failure === "constructor" && constructionAttempts++ === 0) throw error;
+      return native;
+    });
+    loadNative.mockReturnValue({ Jieba: construct });
+    if (failure === "load") loadNative.mockImplementationOnce(() => { throw error; });
+    const { tokenizeText } = await import("./rag/text-ranking");
+    const { rankSocialAtoms } = await import("./social-context/retrieval");
+
+    expect(tokenizeText("海边").map((token) => token.word)).toEqual(["海", "边"]);
+    expect(loadNative).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(rankSocialAtoms("海边", [atom("海边")], { now: 0 })).toHaveLength(1);
+    expect(tokenizeText("海边")).toEqual([{ word: "海边", tag: "n", isStop: false, isNoun: true }]);
+    expect(loadNative).toHaveBeenCalledTimes(2);
+    expect(construct).toHaveBeenCalledTimes(failure === "constructor" ? 2 : 1);
+    expect(warn).toHaveBeenCalledTimes(1);
   });
 
   it("shares a successful native instance and preserves native tags", async () => {
