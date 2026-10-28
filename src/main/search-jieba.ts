@@ -32,3 +32,20 @@ export function getSearchJieba(): Jieba {
     throw error;
   }
 }
+
+/** 在初始化恢复的同一批检索中统一词元；不重试持续失败或 cut/tag 错误。 */
+export function tokenizeSearchBatch<Q, D>(
+  tokenizeQuery: () => Q,
+  tokenizeDocuments: () => D,
+): { queryTokens: Q; documents: D } {
+  let queryTokens = tokenizeQuery();
+  const generation = getSearchJiebaGeneration();
+  let documents = tokenizeDocuments();
+  if (generation !== getSearchJiebaGeneration()) {
+    // 某篇文档分词时才恢复：查询和此前文档也切换到原生词元。
+    // 成功实例始终复用，generation 只转换一次，无需重试循环。
+    queryTokens = tokenizeQuery();
+    documents = tokenizeDocuments();
+  }
+  return { queryTokens, documents };
+}

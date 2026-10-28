@@ -1,4 +1,4 @@
-import { getSearchJieba } from "../search-jieba";
+import { getSearchJieba, tokenizeSearchBatch } from "../search-jieba";
 import type { SocialAtom } from "./types";
 
 const DAY_MS = 86_400_000;
@@ -18,8 +18,10 @@ function tokenize(text: string): string[] {
 }
 
 function bm25Scores(query: string, atoms: readonly SocialAtom[]): number[] {
-  const queryTokens = [...new Set(tokenize(query))];
-  const documents = atoms.map((atom) => tokenize(atom.content));
+  const { queryTokens, documents } = tokenizeSearchBatch(
+    () => [...new Set(tokenize(query))],
+    () => atoms.map((atom) => tokenize(atom.content)),
+  );
   if (queryTokens.length === 0 || documents.length === 0) return atoms.map(() => 0);
   const avgLength = documents.reduce((sum, tokens) => sum + tokens.length, 0) / documents.length || 1;
   const documentFrequency = new Map<string, number>();

@@ -164,22 +164,56 @@ describe("optional native search tokenizer", () => {
     expect(warn).toHaveBeenCalledTimes(50);
   });
 
-  it.each([1, 2])("keeps a search coherent when initialization recovers after %i failed calls", async (failures) => {
-    const native = { cut: (text: string) => [text], tag: (word: string) => [{ word, tag: "n" }] };
-    let attempts = 0;
-    loadNative.mockImplementation(() => {
-      if (attempts++ < failures) throw new Error("temporarily unavailable");
-      return { Jieba: class { constructor() { return native; } } };
+  describe.each(["hybrid", "text", "social"] as const)("%s ranking initialization recovery", (path) => {
+    describe.each(["load", "constructor"] as const)("%s failure", (failure) => {
+      it.each([0, 1, 2])("keeps tokens coherent after %i failed calls", async (failures) => {
+        let attempts = 0;
+        const cut = vi.fn((text: string) => [text]);
+        const native = { cut, tag: (word: string) => [{ word, tag: "n" }] };
+        loadNative.mockImplementation(() => {
+          if (failure === "load" && attempts++ < failures) throw new Error("temporarily unavailable");
+          return { Jieba: class {
+            constructor() {
+              if (failure === "constructor" && attempts++ < failures) throw new Error("temporarily unavailable");
+              return native;
+            }
+          } };
+        });
+        const entries = [{ id: "first", text: "海边", source: "test" }, { id: "second", text: "海边", source: "test" }];
+        let rank: () => Promise<number[]>;
+        if (path === "hybrid") {
+          const { HybridRetriever } = await import("./rag/retriever");
+          const store = { entries, stats: { total: entries.length } };
+          const retriever = new HybridRetriever(store as unknown as import("./rag/vectorstore").JsonVectorStore);
+          rank = async () => (await retriever.retrieve("海边")).map((result) => result.score);
+        } else if (path === "text") {
+          const { rankTextCandidates } = await import("./rag/text-ranking");
+          rank = async () => rankTextCandidates("海边", entries.map((item) => ({ item, text: item.text }))).map((result) => result.score);
+        } else {
+          const { rankSocialAtoms } = await import("./social-context/retrieval");
+          const atoms = entries.map((entry) => ({ ...atom(entry.text), id: entry.id }));
+          rank = async () => {
+            const ranked = rankSocialAtoms("海边", atoms, { now: 0 });
+            expect(ranked.map((item) => item.id)).toEqual(["first", "second"]);
+            return ranked.map(() => 1);
+          };
+        }
+        const scores = await rank();
+        expect(scores).toHaveLength(2);
+        expect(scores.every((score) => score > 0)).toBe(true);
+        expect(scores[0]).toBe(scores[1]);
+        expect(loadNative).toHaveBeenCalledTimes(failures + 1);
+        expect(warn).toHaveBeenCalledTimes(failures);
+        // Recovery triggers at most one new batch; HybridRetriever reuses
+        // documents already tokenized in the successful generation.
+        expect(cut).toHaveBeenCalledTimes(failures === 0 || path === "hybrid" ? 3 : 6 - failures);
+        const callsAfterRecovery = cut.mock.calls.length;
+        expect(await rank()).toEqual(scores);
+        expect(cut).toHaveBeenCalledTimes(callsAfterRecovery + (path === "hybrid" ? 1 : 3));
+        expect(loadNative).toHaveBeenCalledTimes(failures + 1);
+        expect(warn).toHaveBeenCalledTimes(failures);
+      });
     });
-    const { HybridRetriever } = await import("./rag/retriever");
-    const entries = [{ id: "first", text: "海边", source: "test" }, { id: "second", text: "海边", source: "test" }];
-    const store = { entries, stats: { total: entries.length } };
-    const retriever = new HybridRetriever(store as unknown as import("./rag/vectorstore").JsonVectorStore);
-    const results = await retriever.retrieve("海边");
-    expect(results).toHaveLength(2);
-    expect(results.every((result) => result.score > 0)).toBe(true);
-    expect(results[0].score).toBe(results[1].score);
-    expect(warn).toHaveBeenCalledTimes(failures);
   });
 
 });

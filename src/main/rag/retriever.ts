@@ -1,7 +1,7 @@
 import { JsonVectorStore, SearchResult } from "./vectorstore";
 import { EmbeddingProvider, getEmbeddingProvider } from "./embedding";
 import { getReranker } from "./reranker";
-import { getSearchJiebaGeneration } from "../search-jieba";
+import { getSearchJiebaGeneration, tokenizeSearchBatch } from "../search-jieba";
 
 export { registerJiebaCustomWord, registerJiebaCustomWords } from "./text-ranking";
 import { getJiebaCustomWordsVersion, rankTokenizedCandidates, tokenizeText, type SearchToken } from "./text-ranking";
@@ -151,16 +151,11 @@ export class HybridRetriever {
     const allowedEntryIds = options.allowedEntryIds ? new Set(options.allowedEntryIds) : null;
     const docs = (source ? entries.filter((entry) => entry.source === source) : entries)
       .filter((entry) => !allowedEntryIds || allowedEntryIds.has(entry.id));
-    let queryTokens = tokenizeText(query);
-    const generation = getSearchJiebaGeneration();
-    let candidates = docs.map((item) => ({ item, tokens: getDocTokens(item) }));
-    if (generation !== getSearchJiebaGeneration()) {
-      // 某篇文档分词时才恢复：查询和此前文档也必须切换到原生词元。
-      // 成功实例始终复用，generation 只会转换一次，无需重试循环。
-      queryTokens = tokenizeText(query);
-      candidates = docs.map((item) => ({ item, tokens: getDocTokens(item) }));
-    }
-    const ranked = rankTokenizedCandidates(queryTokens, candidates, topK);
+    const { queryTokens, documents } = tokenizeSearchBatch(
+      () => tokenizeText(query),
+      () => docs.map((item) => ({ item, tokens: getDocTokens(item) })),
+    );
+    const ranked = rankTokenizedCandidates(queryTokens, documents, topK);
     return ranked.map(({ item: entry, score }) => ({ entry, score }));
   }
 }

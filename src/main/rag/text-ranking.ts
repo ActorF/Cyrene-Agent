@@ -1,4 +1,4 @@
-import { getSearchJieba } from "../search-jieba";
+import { getSearchJieba, tokenizeSearchBatch } from "../search-jieba";
 
 export interface SearchToken {
   word: string;
@@ -129,11 +129,14 @@ export function rankTextCandidates<T>(
   topK = candidates.length,
 ): RankedTextCandidate<T>[] {
   if (candidates.length === 0 || topK <= 0) return [];
-  const queryTokens = tokenizeText(query);
-  return rankTokenizedCandidates(queryTokens, candidates.map((candidate) => ({
-    item: candidate.item,
-    tokens: tokenizeText(candidate.text),
-  })), topK);
+  const { queryTokens, documents } = tokenizeSearchBatch(
+    () => tokenizeText(query),
+    () => candidates.map((candidate) => ({
+      item: candidate.item,
+      tokens: tokenizeText(candidate.text),
+    })),
+  );
+  return rankTokenizedCandidates(queryTokens, documents, topK);
 }
 
 export function rankTokenizedCandidates<T>(
